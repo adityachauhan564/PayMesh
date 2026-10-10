@@ -3,6 +3,7 @@ package com.paymesh.gateway.support;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -14,6 +15,7 @@ import java.util.Map;
  * the stubs live for the whole test JVM (the cached context keeps pointing at them).
  * The login rate limit is effectively off here; LoginRateLimitTest covers it with tight limits.
  */
+@AutoConfigureWebTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "jwt.secret=" + TestTokens.SECRET,
         "jwt.issuer=" + TestTokens.ISSUER,

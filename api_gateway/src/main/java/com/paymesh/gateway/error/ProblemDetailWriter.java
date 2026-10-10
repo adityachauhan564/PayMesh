@@ -1,6 +1,6 @@
 package com.paymesh.gateway.error;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
@@ -15,10 +15,10 @@ import java.net.URI;
 @Component
 public class ProblemDetailWriter {
 
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
 
-    public ProblemDetailWriter(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
+    public ProblemDetailWriter(JsonMapper jsonMapper) {
+        this.jsonMapper = jsonMapper;
     }
 
     public Mono<Void> write(ServerWebExchange exchange, HttpStatus status, String detail) {
@@ -28,6 +28,6 @@ public class ProblemDetailWriter {
         ServerHttpResponse response = exchange.getResponse();
         response.setStatusCode(status);
         response.getHeaders().setContentType(MediaType.APPLICATION_PROBLEM_JSON);
-        return response.writeWith(Mono.fromCallable(() -> response.bufferFactory().wrap(objectMapper.writeValueAsBytes(problem))));
+        return response.writeWith(Mono.fromCallable(() -> response.bufferFactory().wrap(jsonMapper.writeValueAsBytes(problem))));
     }
 }
