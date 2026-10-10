@@ -1,7 +1,7 @@
 package com.paymesh.outbox;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,12 +12,12 @@ import org.springframework.transaction.annotation.Transactional;
 public class Outbox {
 
     private final OutboxEventRepository repository;
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
     private final String producer;
 
-    Outbox(OutboxEventRepository repository, ObjectMapper objectMapper, String producer) {
+    Outbox(OutboxEventRepository repository, JsonMapper jsonMapper, String producer) {
         this.repository = repository;
-        this.objectMapper = objectMapper;
+        this.jsonMapper = jsonMapper;
         this.producer = producer;
     }
 
@@ -32,8 +32,8 @@ public class Outbox {
 
     private String toJson(Object payload) {
         try {
-            return objectMapper.writeValueAsString(payload);
-        } catch (JsonProcessingException e) {
+            return jsonMapper.writeValueAsString(payload);
+        } catch (JacksonException e) {
             throw new IllegalStateException("Outbox payload is not serializable: " + payload.getClass(), e);
         }
     }

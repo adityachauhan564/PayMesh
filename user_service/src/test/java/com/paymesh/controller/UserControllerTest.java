@@ -1,6 +1,5 @@
 package com.paymesh.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paymesh.constants.TopicConstants;
 import com.paymesh.dto.UserWalletCreationRequest;
 import com.paymesh.model.User;
@@ -12,7 +11,7 @@ import com.paymesh.service.LoginAttemptService;
 import com.paymesh.service.UserOperationsService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
@@ -25,6 +24,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Optional;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -43,7 +43,7 @@ class UserControllerTest {
     @Autowired
     private MockMvc mockMvc;
     @Autowired
-    private ObjectMapper objectMapper;
+    private JsonMapper jsonMapper;
     @Autowired
     private PasswordEncoder passwordEncoder;
     @Autowired
@@ -70,7 +70,7 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.user.passwordHash").doesNotExist())
                 .andReturn().getResponse().getContentAsString();
 
-        Jwt token = jwtDecoder.decode(objectMapper.readTree(body).get("token").asText());
+        Jwt token = jwtDecoder.decode(jsonMapper.readTree(body).get("token").asString());
         assertThat(token.getClaimAsString("iss")).isEqualTo("paymesh");
         assertThat(token.getSubject()).isEqualTo("7");
     }

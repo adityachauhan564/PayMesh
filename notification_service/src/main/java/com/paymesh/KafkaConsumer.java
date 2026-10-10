@@ -1,7 +1,5 @@
 package com.paymesh;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import com.paymesh.constants.TopicConstants;
 import com.paymesh.dto.SendMailNotification;
@@ -12,13 +10,14 @@ import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.json.JsonMapper;
 
 @Component
 @Slf4j
 public class KafkaConsumer {
 
     @Autowired
-    private ObjectMapper objectMapper;
+    private JsonMapper jsonMapper;
 
     @Autowired
     private JavaMailSender javaMailSender;
@@ -27,8 +26,8 @@ public class KafkaConsumer {
     private String mailFrom;
 
     @KafkaListener(topics = TopicConstants.SEND_NOTIFICATION_TOPIC, groupId = "send_notification")
-    public void sendNotification(String message) throws JsonProcessingException {
-        SendMailNotification mail = objectMapper.readValue(message, SendMailNotification.class);
+    public void sendNotification(String message) {
+        SendMailNotification mail = jsonMapper.readValue(message, SendMailNotification.class);
         if (mailFrom.isBlank()) {
             log.info("MAIL_USERNAME not set, printing mail instead.\nTo: {}\nSubject: {}\n{}", mail.receiverMailId(), mail.subject(), mail.message());
             return;

@@ -1,12 +1,12 @@
 package com.paymesh.support;
 
 import org.springframework.test.context.DynamicPropertyRegistry;
-import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.mysql.MySQLContainer;
 
 /** One real MySQL for the whole test JVM (started once, removed by Testcontainers at exit). */
 public final class MySqlTestContainer {
 
-    private static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4");
+    private static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4");
 
     static {
         MYSQL.start();

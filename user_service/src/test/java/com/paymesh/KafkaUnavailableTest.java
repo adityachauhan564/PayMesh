@@ -1,6 +1,5 @@
 package com.paymesh;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paymesh.constants.TopicConstants;
 import com.paymesh.outbox.OutboxEvent;
 import com.paymesh.outbox.OutboxEventRepository;
@@ -23,6 +22,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import tools.jackson.databind.json.JsonMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -64,7 +64,7 @@ class KafkaUnavailableTest {
 
         assertThat(response.statusCode()).isEqualTo(201);
         assertThat(took).as("blocked on Kafka for %s", took).isLessThan(Duration.ofSeconds(15));
-        long userId = new ObjectMapper().readTree(response.body()).at("/user/userId").asLong();
+        long userId = new JsonMapper().readTree(response.body()).at("/user/userId").asLong();
         assertThat(outboxEvents.findAll())
                 .filteredOn(event -> event.getTopic().equals(TopicConstants.USER_CREATION_TOPIC))
                 .extracting(OutboxEvent::getMessageKey)

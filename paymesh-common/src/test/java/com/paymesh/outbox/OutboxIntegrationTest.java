@@ -13,7 +13,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.mysql.MySQLContainer;
 
 import java.time.Duration;
 import java.util.List;
@@ -36,7 +36,7 @@ import static org.mockito.Mockito.*;
         "outbox.poll-interval-ms=3600000"}) // relay runs only when a test calls it
 class OutboxIntegrationTest {
 
-    private static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4");
+    private static final MySQLContainer MYSQL = new MySQLContainer("mysql:8.4");
 
     static {
         MYSQL.start();
