@@ -1,0 +1,6 @@
+.git
+**/target
+.idea
+.vscode
+# Built from its own context (wallet-ui/Dockerfile)
+wallet-ui
