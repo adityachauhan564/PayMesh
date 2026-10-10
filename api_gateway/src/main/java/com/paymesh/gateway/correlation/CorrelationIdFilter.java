@@ -32,6 +32,11 @@ public class CorrelationIdFilter implements WebFilter {
                 .headers(headers -> headers.set(HEADER, correlationId))
                 .build();
         exchange.getResponse().getHeaders().set(HEADER, correlationId);
+        // Services echo the id too and the gateway copies their headers in, so set it again last: exactly one value.
+        exchange.getResponse().beforeCommit(() -> {
+            exchange.getResponse().getHeaders().set(HEADER, correlationId);
+            return Mono.empty();
+        });
         return chain.filter(exchange.mutate().request(request).build());
     }
 

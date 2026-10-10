@@ -85,6 +85,11 @@ public final class StubUpstream implements AutoCloseable {
         sleep(responseDelay);
         byte[] response = ("{\"upstream\":\"" + name + "\"}").getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/json");
+        // Like the real services (CorrelationIdLoggingFilter), echo the correlation id back
+        String correlationId = exchange.getRequestHeaders().getFirst("X-Correlation-Id");
+        if (correlationId != null) {
+            exchange.getResponseHeaders().add("X-Correlation-Id", correlationId);
+        }
         exchange.sendResponseHeaders(200, response.length);
         exchange.getResponseBody().write(response);
         exchange.close();

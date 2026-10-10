@@ -24,6 +24,13 @@ class CorrelationIdTest extends GatewayTestSupport {
     }
 
     @Test
+    void returnsTheIdOnceEvenThoughTheServiceEchoesIt() {
+        client.get().uri("/api/wallets/me").headers(h -> h.setBearerAuth(TestTokens.valid())).exchange()
+                .expectStatus().isOk()
+                .expectHeader().values(HEADER, values -> assertThat(values).hasSize(1));
+    }
+
+    @Test
     void propagatesAWellFormedIncomingId() throws InterruptedException {
         client.get().uri("/api/wallets/me")
                 .headers(h -> {
