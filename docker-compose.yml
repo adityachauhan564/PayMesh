@@ -103,5 +103,12 @@ services:
       # Safe only because the gateway port is not published: nothing can reach it around nginx.
       TRUSTED_PROXY_COUNT: 1
 
+  # The only published app port: Angular app plus /api proxied to the gateway
+  wallet-ui:
+    build: ./wallet-ui
+    restart: unless-stopped
+    depends_on: [api-gateway]
+    ports: ["127.0.0.1:4200:8080"]
+
 volumes:
   mysql-data:
