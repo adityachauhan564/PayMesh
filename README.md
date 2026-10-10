@@ -679,7 +679,6 @@ paymesh/
 │       └── pages/               auth · dashboard · pay · history · profile · txn-list
 ├── Dockerfile                   one image per Spring Boot service (--build-arg SERVICE=<module>)
 ├── docker-compose.yml           whole stack, or infra only for IDE runs
-├── PLAN.md                      original analysis and improvement plan
 └── Requirements                 original project brief
 ```
 

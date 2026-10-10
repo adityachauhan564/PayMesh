@@ -5,6 +5,8 @@ target/
 **/dist/
 **/.angular/
 *.log
+# Personal working notes, kept locally only
+PLAN.md
 !.mvn/wrapper/maven-wrapper.jar
 
 ### STS ###
