@@ -33,8 +33,29 @@ What didn't: the name (still "JBDL Wallet"), Java 17, and an end-of-life Spring 
 
 Result: 123/123 backend tests pass (same as baseline), 0 deprecation warnings (`@MockBean` replaced by `@MockitoBean`), Angular production build OK.
 
+## Phase 2: Spring Boot 4 (in progress)
+
+**Versions:** Spring Boot **4.0.8** + Spring Cloud **2025.1.3** (Gateway 5.0), one version everywhere.
+Boot 4.1 exists, but no Spring Cloud train supports it yet; Gateway's compatibility check would refuse it.
+
+**Constraint:** no behaviour or API change. Same 123 tests must pass unchanged in intent.
+
+| Boot 4 change | Impact on PayMesh | Action |
+|---|---|---|
+| Auto-configuration split into per-technology modules | `spring-kafka` alone no longer auto-configures `KafkaTemplate`; `@WebMvcTest` lives in its own test module | `spring-boot-starter-webmvc`, `spring-boot-starter-kafka`, matching `*-test` starters |
+| Jackson 3 is the default (`tools.jackson`) | Gateway error writer, outbox, 3 Kafka consumers, 2 tests use `ObjectMapper` | Move to `JsonMapper`; `JacksonException` is unchecked, so checked-exception plumbing goes away. No `spring-boot-jackson2` shim (deprecated on arrival) |
+| Classes moved to new packages | `@WebMvcTest`, `ErrorWebExceptionHandler`, `DefaultKafkaProducerFactoryCustomizer` | Import changes only |
+| Testcontainers 2.x | New artifact names and `org.testcontainers.mysql` package | Rename deps and imports |
+| Spring Cloud Gateway 5 | Old starter and `spring.cloud.gateway.*` prefix removed | Already on `gateway-server-webflux` + `server.webflux` prefix since phase 1 |
+| Security 7, Hibernate 7, Kafka 4 client | Code already uses lambda DSL, `StringSerializer`, plain JPA | Expect none; fix what the compiler/tests surface |
+
+**Commit sequence** (each one builds and passes tests on its own):
+1. `docs(plan)`: this section.
+2. `build(gateway)`: the gateway has its own Boot parent, so it migrates on its own.
+3. `build`: `paymesh-common` + services. Starters, Jackson 3 and Testcontainers 2 must land together (Boot 4 no longer brings Jackson 2).
+4. `docs`: README versions and badges.
+
 ## Deliberately skipped
 
-- Spring Boot 4 migration: say so if you want it.
 - Renaming `user_service` etc. directories: cosmetic churn.
 - Containerising each service: compose still runs infra only.
