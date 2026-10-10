@@ -1,0 +1,72 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      # Short timeouts so a Redis outage fails open within half a second instead of
+      # stalling every login (Lettuce otherwise queues commands for up to 60 s while reconnecting).
+      connect-timeout: 500ms
+      timeout: 500ms
+  cloud:
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 2000   # ms; a dead service becomes a 503 quickly
+            response-timeout: 10s   # a hung service becomes a 504
+          # Paths are forwarded unchanged; they must match the services' controller mappings.
+          # notification_service only consumes Kafka events, so it has no public route.
+          routes:
+            # Brute-force protection: token bucket per client IP, kept in Redis so every gateway instance shares it.
+            # Defaults: 5 attempts at once (60 / 12), then 1 more every 12 s (12 tokens at 1 token/s), i.e. 5 per minute.
+            # Must stay before user-service, which would otherwise match /api/auth/login first.
+            - id: user-service-login
+              order: -1
+              uri: ${USER_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/auth/login
+                - Method=POST
+              filters:
+                - name: RequestRateLimiter
+                  args:
+                    key-resolver: "#{@clientAddressKeyResolver}"
+                    redis-rate-limiter.replenishRate: ${LOGIN_RATE_LIMIT_REPLENISH_RATE:1}
+                    redis-rate-limiter.burstCapacity: ${LOGIN_RATE_LIMIT_BURST_CAPACITY:60}
+                    redis-rate-limiter.requestedTokens: ${LOGIN_RATE_LIMIT_REQUESTED_TOKENS:12}
+            - id: user-service
+              uri: ${USER_SERVICE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/auth/**,/api/users/**
+            - id: wallet-service
+              uri: ${WALLET_SERVICE_URL:http://localhost:8091}
+              predicates:
+                - Path=/api/wallets/**
+            - id: transaction-service
+              uri: ${TRANSACTION_SERVICE_URL:http://localhost:8086}
+              predicates:
+                - Path=/api/transactions/**
+
+# jwt.secret has no default on purpose: set JWT_SECRET (same value as every service),
+# or run with the "local" profile for development.
+jwt:
+  issuer: ${JWT_ISSUER:paymesh}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+  health:
+    redis:
+      # If Redis is down the rate limiter lets requests through (fail-open), so the gateway still works
+      # and must not report itself unhealthy (that would make orchestrators restart it for nothing).
+      enabled: false
