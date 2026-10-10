@@ -5,17 +5,17 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: Abc@1234
       MYSQL_DATABASE: paymesh
-    ports: ["3306:3306"]
+    ports: ["127.0.0.1:3306:3306"]
     volumes: [mysql-data:/var/lib/mysql]
 
   kafka:
     image: apache/kafka:3.8.0
-    ports: ["9092:9092"]
+    ports: ["127.0.0.1:9092:9092"]
 
   # Login rate-limit buckets for api_gateway. Losing them is harmless, so no volume.
   redis:
     image: redis:7.4-alpine
-    ports: ["6379:6379"]
+    ports: ["127.0.0.1:6379:6379"]
 
 volumes:
   mysql-data:
