@@ -65,7 +65,20 @@ Surprises along the way:
 - The smoke run showed `X-Correlation-Id` returned twice (gateway + service echo). Pre-existing on Boot 3.5;
   fixed in its own commit with a regression test.
 
+## Phase 3: containers (done)
+
+`docker compose up -d --build` runs the whole stack; `docker compose up -d mysql kafka redis` keeps the IDE workflow.
+
+- One root `Dockerfile` for all Spring Boot services (`--build-arg SERVICE=<module>`), JRE 21, non-root.
+- `wallet-ui` in nginx is the only published app port (4200): app + `/api` proxy. The gateway trusts that one
+  proxy hop for client IPs and is deliberately unpublished, so `X-Forwarded-For` cannot be forged around nginx.
+- Kafka has two listeners: `kafka:19092` in the compose network, `localhost:9092` for host-run apps.
+- Verified: full money flow through nginx, host-run service publishing to containerised consumers, forged
+  `X-Forwarded-For` still rate-limited, recreated gateway picked up by nginx without a restart.
+- Known: Docker Compose multi-service builds fail when the checkout path contains non-ASCII characters
+  (BuildKit session header); documented in the README's troubleshooting.
+
 ## Deliberately skipped
 
+- Kubernetes manifests, image registry, CI pipeline, actuator health checks on the four services.
 - Renaming `user_service` etc. directories: cosmetic churn.
-- Containerising each service: compose still runs infra only.

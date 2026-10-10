@@ -536,20 +536,46 @@ Every error from the gateway and from services looks like this:
 
 | Tool | Version | Used for |
 |---|---|---|
-| Java | 21+ | services (Maven wrapper included, no Maven install needed) |
-| Node.js | 20.19+ or 22.12+ | Angular app |
-| Docker | any recent | MySQL, Kafka, Redis, and the integration tests |
+| Docker | any recent | everything in containers; MySQL, Kafka, Redis and the integration tests otherwise |
+| Java | 21+ | only to run or test services outside Docker (Maven wrapper included) |
+| Node.js | 20.19+ or 22.12+ | only to run the Angular dev server |
 
-### 1. Start the infrastructure
+### Option A: everything in Docker (one command)
 
 ```bash
 cd paymesh
-docker compose up -d          # MySQL :3306, Kafka :9092, Redis :6379
+docker compose up -d --build     # first build takes a few minutes
+```
+
+Open **http://localhost:4200**. That one port serves the app and the API (`/api/**`, proxied by nginx to the gateway), so
+`curl http://localhost:4200/api/...` works too. Services and the gateway are not published; MySQL `:3306`, Kafka `:9092`
+and Redis `:6379` are, on localhost only.
+
+| Container | Built from | Notes |
+|---|---|---|
+| `wallet-ui` | `wallet-ui/Dockerfile` | nginx: Angular app + `/api` proxy; the only way in |
+| `api-gateway`, `user-service`, `wallet-service`, `transaction-service`, `notification-service` | root `Dockerfile` with `SERVICE=<module>` | JRE 21, non-root |
+| `mysql`, `kafka`, `redis` | upstream images | health-checked; services wait for MySQL and Kafka |
+
+Settings come from your shell or a `.env` file next to `docker-compose.yml`: `JWT_SECRET` (defaults to the dev secret),
+`MAIL_USERNAME` / `MAIL_PASSWORD` (unset = mails are logged by `notification-service`).
+
+```bash
+docker compose logs -f notification-service    # the emails
+docker compose down                            # stop; add -v to also wipe the database
+```
+
+### Option B: develop locally (services from your IDE)
+
+#### 1. Start the infrastructure
+
+```bash
+docker compose up -d mysql kafka redis    # MySQL :3306, Kafka :9092, Redis :6379
 ```
 
 > Already have MySQL on 3306? Start only the rest (`docker compose up -d kafka redis`) and point the services at yours with `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`.
 
-### 2. Build and start the backend
+#### 2. Build and start the backend
 
 ```bash
 ./mvnw -q install -DskipTests            # Windows: mvnw.cmd -q install -DskipTests
@@ -567,7 +593,7 @@ java -jar api_gateway/target/api_gateway-0.0.1-SNAPSHOT.jar                   --
 
 The `local` profile supplies a **development-only** JWT secret. Anywhere else, set `JWT_SECRET` instead (same value on all five).
 
-### 3. Start the web app
+#### 3. Start the web app
 
 ```bash
 cd wallet-ui
@@ -575,7 +601,7 @@ npm install
 npm start                    # http://localhost:4200, proxies /api to the gateway on :8080
 ```
 
-### 4. Try it
+### Try it
 
 1. Open http://localhost:4200 and **create an account**. The dashboard shows "being created" for a moment, then your ₹0.00 wallet.
 2. **Add money**, then register a second user in a private window.
@@ -651,7 +677,8 @@ paymesh/
 │   └── src/app/
 │       ├── api.ts               HTTP client, JWT interceptor, auth guard, types
 │       └── pages/               auth · dashboard · pay · history · profile · txn-list
-├── docker-compose.yml           MySQL, Kafka, Redis for local development
+├── Dockerfile                   one image per Spring Boot service (--build-arg SERVICE=<module>)
+├── docker-compose.yml           whole stack, or infra only for IDE runs
 ├── PLAN.md                      original analysis and improvement plan
 └── Requirements                 original project brief
 ```
@@ -698,6 +725,7 @@ paymesh/
 | Wallet says *"being created"* for a long time | Kafka or wallet_service isn't running. Nothing is lost: pending events sit in `outbox_event` and go out once both are up |
 | Payment stuck at *Processing* | Same as above: check Kafka and wallet_service |
 | Login returns **429** | Too many attempts from your IP, or the account is locked; wait for `Retry-After` seconds |
+| `docker compose up --build` fails with *header key "x-docker-expose-session-sharedkey" contains value with non-printable ASCII characters* | A Docker Compose/BuildKit bug with non-ASCII characters in the folder path (e.g. an em dash). Clone into a plain ASCII folder such as `paymesh/`, or build images one at a time: `docker compose build user-service`, then the next, then `docker compose up -d` |
 | Tests fail with a Docker error | Start Docker (Testcontainers runs MySQL and Redis for the integration tests) |
 | `npm start` fails with a Node version error | Angular 21 needs Node 20.19+ or 22.12+ |
 | UI shows *"Server is unreachable"* | The gateway (`:8080`) isn't running, or the UI isn't served through `npm start` (which proxies `/api`) |
