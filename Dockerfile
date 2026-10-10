@@ -6,8 +6,8 @@ FROM maven:3.9-eclipse-temurin-21 AS build
 ARG SERVICE
 WORKDIR /src
 COPY . .
-# The cache mount keeps ~/.m2 between builds, so only changed modules cost time
-RUN --mount=type=cache,target=/root/.m2 \
+# The cache mount keeps ~/.m2 between builds; "locked" because compose builds all services in parallel
+RUN --mount=type=cache,target=/root/.m2,sharing=locked \
     test -n "$SERVICE" || { echo "SERVICE build arg is required" >&2; exit 1; } \
  && mvn -B -q -pl "$SERVICE" -am package -DskipTests \
  && cp "$SERVICE"/target/"$SERVICE"-*-SNAPSHOT.jar /app.jar

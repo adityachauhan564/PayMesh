@@ -1,4 +1,23 @@
-# Local infra only: services run from the IDE / mvnw, Angular via `npm start`.
+# Whole stack:      docker compose up -d --build        → app and API on http://localhost:4200
+# Infra only (run services from the IDE / mvnw):  docker compose up -d mysql kafka redis
+# Only the UI port is published for the app; services talk to each other on the compose network.
+# Infra ports stay published on localhost for IDE runs.
+name: paymesh
+
+x-spring-service: &spring-service
+  restart: unless-stopped
+  depends_on:
+    mysql: { condition: service_healthy }
+    kafka: { condition: service_healthy }
+
+x-service-env: &service-env
+  DB_URL: jdbc:mysql://mysql:3306/paymesh?createDatabaseIfNotExist=true
+  DB_USERNAME: root
+  DB_PASSWORD: Abc@1234
+  KAFKA_SERVERS: kafka:19092
+  # Override from the shell or a .env file; the fallback is the dev secret the "local" profile uses
+  JWT_SECRET: ${JWT_SECRET:-paymesh-local-dev-secret-change-me-in-prod}
+
 services:
   mysql:
     image: mysql:8.4
@@ -7,15 +26,82 @@ services:
       MYSQL_DATABASE: paymesh
     ports: ["127.0.0.1:3306:3306"]
     volumes: [mysql-data:/var/lib/mysql]
+    healthcheck:
+      # TCP, not the socket: during first-run init MySQL serves the socket only, so this waits for the real server
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
 
+  # Two listeners: containers use kafka:19092, apps on the host (IDE) use localhost:9092.
   kafka:
     image: apache/kafka:3.8.0
     ports: ["127.0.0.1:9092:9092"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:19092,EXTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:19092 > /dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 15s
 
   # Login rate-limit buckets for api_gateway. Losing them is harmless, so no volume.
   redis:
     image: redis:7.4-alpine
     ports: ["127.0.0.1:6379:6379"]
+
+  user-service:
+    <<: *spring-service
+    build: { context: ., args: { SERVICE: user_service } }
+    environment: *service-env
+
+  wallet-service:
+    <<: *spring-service
+    build: { context: ., args: { SERVICE: wallet_service } }
+    environment: *service-env
+
+  transaction-service:
+    <<: *spring-service
+    build: { context: ., args: { SERVICE: transaction_service } }
+    environment: *service-env
+
+  notification-service:
+    <<: *spring-service
+    build: { context: ., args: { SERVICE: notification_service } }
+    depends_on:
+      kafka: { condition: service_healthy }
+    environment:
+      KAFKA_SERVERS: kafka:19092
+      JWT_SECRET: ${JWT_SECRET:-paymesh-local-dev-secret-change-me-in-prod}
+      # Unset = mails are logged instead of sent (see notification_service)
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+
+  api-gateway:
+    build: { context: ., args: { SERVICE: api_gateway } }
+    restart: unless-stopped
+    depends_on: [redis, user-service, wallet-service, transaction-service]
+    environment:
+      USER_SERVICE_URL: http://user-service:8081
+      WALLET_SERVICE_URL: http://wallet-service:8091
+      TRANSACTION_SERVICE_URL: http://transaction-service:8086
+      REDIS_HOST: redis
+      JWT_SECRET: ${JWT_SECRET:-paymesh-local-dev-secret-change-me-in-prod}
+      # Every request arrives through the wallet-ui nginx, which appends the client IP to X-Forwarded-For.
+      # Safe only because the gateway port is not published: nothing can reach it around nginx.
+      TRUSTED_PROXY_COUNT: 1
 
 volumes:
   mysql-data:
