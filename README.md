@@ -1,12 +1,12 @@
 # PayMesh: Event-Driven Digital Wallet Platform
 
-A secure, event-driven digital wallet built as **Spring Boot microservices** on **Java 21**: centralized API routing through **Spring Cloud Gateway**, **JWT** authentication with **Spring Security**, asynchronous **Apache Kafka** messaging for transaction processing and notifications, **MySQL** storage, and an **Angular** web app.
+A secure, event-driven digital wallet built as **Spring Boot 4 microservices** on **Java 21**: centralized API routing through **Spring Cloud Gateway**, **JWT** authentication with **Spring Security**, asynchronous **Apache Kafka** messaging for transaction processing and notifications, **MySQL** storage, and an **Angular** web app.
 
 Users can register, add money, send money to other users by mobile number, pay bills and recharges, withdraw to a bank, set daily limits, and see their full history, with an email for every money movement.
 
 ![Java](https://img.shields.io/badge/Java-21-orange)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F)
-![Spring Cloud Gateway](https://img.shields.io/badge/Spring%20Cloud%20Gateway-2025.0-6DB33F)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-6DB33F)
+![Spring Cloud Gateway](https://img.shields.io/badge/Spring%20Cloud%20Gateway-5.0-6DB33F)
 ![Angular](https://img.shields.io/badge/Angular-21-DD0031)
 ![Kafka](https://img.shields.io/badge/Apache%20Kafka-3.8-231F20)
 ![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1)
@@ -670,7 +670,7 @@ paymesh/
 | **`BigDecimal` for money** | `double` can't represent ₹0.10 exactly |
 | **ProblemDetail (RFC 7807) everywhere** | One error shape for the UI, from the gateway and every service |
 | **`spring.jpa.open-in-view=false` in user_service** | With it on, the row-locked read returned a stale cached copy and concurrent failed logins overwrote each other's count |
-| **Gateway on its own Boot parent** | The root POM adds servlet `spring-boot-starter-web` to every module; the gateway must be reactive |
+| **Gateway on its own Boot parent** | The root POM adds servlet `spring-boot-starter-webmvc` to every module; the gateway must be reactive |
 | **Java 21 virtual threads** (`spring.threads.virtual.enabled`) | Every service blocks on JDBC, Kafka or SMTP; virtual threads make that cheap without going reactive |
 | **Fail-open rate limiting** | A Redis outage must not lock every user out; the per-account lockout still applies |
 

@@ -13,7 +13,7 @@ What didn't: the name (still "JBDL Wallet"), Java 17, and an end-of-life Spring 
 | Area | Before | After | Why |
 |---|---|---|---|
 | Java | 17 | **21** (LTS) | Required; enables virtual threads |
-| Spring Boot | 3.2.2 (services) / 3.2.12 (gateway) | **3.5.16**, one version everywhere | 3.2 is EOL; 3.5 is the latest 3.x. Boot 4 is a larger migration (Jackson 3, Security 7), deferred |
+| Spring Boot | 3.2.2 (services) / 3.2.12 (gateway) | **3.5.16**, one version everywhere (superseded by phase 2: 4.0.8) | 3.2 is EOL |
 | Spring Cloud | 2023.0.6 | **2025.0.3** | Train for Boot 3.5; gateway moves to `spring-cloud-starter-gateway-server-webflux` |
 | Testcontainers | pinned 1.21.4 override | Boot-managed | Boot 3.5 already ships a Docker 29 compatible version |
 | Threads | platform | **virtual threads** (`spring.threads.virtual.enabled`) | Java 21 win for blocking JDBC/Kafka services, one line each |
@@ -33,7 +33,7 @@ What didn't: the name (still "JBDL Wallet"), Java 17, and an end-of-life Spring 
 
 Result: 123/123 backend tests pass (same as baseline), 0 deprecation warnings (`@MockBean` replaced by `@MockitoBean`), Angular production build OK.
 
-## Phase 2: Spring Boot 4 (in progress)
+## Phase 2: Spring Boot 4 (done)
 
 **Versions:** Spring Boot **4.0.8** + Spring Cloud **2025.1.3** (Gateway 5.0), one version everywhere.
 Boot 4.1 exists, but no Spring Cloud train supports it yet; Gateway's compatibility check would refuse it.
@@ -54,6 +54,16 @@ Boot 4.1 exists, but no Spring Cloud train supports it yet; Gateway's compatibil
 2. `build(gateway)`: the gateway has its own Boot parent, so it migrates on its own.
 3. `build`: `paymesh-common` + services. Starters, Jackson 3 and Testcontainers 2 must land together (Boot 4 no longer brings Jackson 2).
 4. `docs`: README versions and badges.
+
+**Result:** 124/124 tests (123 + one regression test), no deprecation warnings, Angular build OK.
+End-to-end smoke run of all five apps through the gateway: register, wallet created over Kafka, add money,
+transfer, insufficient-balance rejection, notification emails.
+
+Surprises along the way:
+- `@WebMvcTest` slices lost their `HttpSecurity` bean: Boot 4 moved the slice's security auto-configuration
+  into `spring-boot-security-test`, so the root POM uses `spring-boot-starter-security-test`.
+- The smoke run showed `X-Correlation-Id` returned twice (gateway + service echo). Pre-existing on Boot 3.5;
+  fixed in its own commit with a regression test.
 
 ## Deliberately skipped
 
