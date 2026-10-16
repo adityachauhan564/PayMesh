@@ -546,6 +546,7 @@ Every error from the gateway and from services looks like this:
 cd paymesh
 cp .env.example .env            # then edit the secrets; compose refuses to start without them
 docker compose up -d --build     # first build takes a few minutes
+# Folder path has non-ASCII characters? Use: sh scripts/build-images.sh && docker compose up -d
 ```
 
 Open **http://localhost:4200**. That one port serves the app and the API (`/api/**`, proxied by nginx to the gateway), so
@@ -725,7 +726,7 @@ paymesh/
 | Wallet says *"being created"* for a long time | Kafka or wallet_service isn't running. Nothing is lost: pending events sit in `outbox_event` and go out once both are up |
 | Payment stuck at *Processing* | Same as above: check Kafka and wallet_service |
 | Login returns **429** | Too many attempts from your IP, or the account is locked; wait for `Retry-After` seconds |
-| `docker compose up --build` fails with *header key "x-docker-expose-session-sharedkey" contains value with non-printable ASCII characters* | A Docker Compose/BuildKit bug with non-ASCII characters in the folder path (e.g. an em dash). Clone into a plain ASCII folder such as `paymesh/`, or build images one at a time: `docker compose build user-service`, then the next, then `docker compose up -d` |
+| `docker compose up --build` fails with *header key "x-docker-expose-session-sharedkey" contains value with non-printable ASCII characters* | A Docker Compose/BuildKit bug when the folder path has non-ASCII characters (e.g. an em dash) and several images build at once. Run `sh scripts/build-images.sh` (builds them one at a time), then `docker compose up -d` |
 | Tests fail with a Docker error | Start Docker (Testcontainers runs MySQL and Redis for the integration tests) |
 | `npm start` fails with a Node version error | Angular 21 needs Node 20.19+ or 22.12+ |
 | UI shows *"Server is unreachable"* | The gateway (`:8080`) isn't running, or the UI isn't served through `npm start` (which proxies `/api`) |
