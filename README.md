@@ -574,6 +574,7 @@ docker compose down                            # stop; add -v to also wipe the d
 #### 1. Start the infrastructure
 
 ```bash
+cp .env.example .env                    # its placeholder DB password matches the local profile default
 docker compose up -d mysql kafka redis    # MySQL :3306, Kafka :9092, Redis :6379
 ```
 
