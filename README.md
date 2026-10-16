@@ -544,6 +544,7 @@ Every error from the gateway and from services looks like this:
 
 ```bash
 cd paymesh
+cp .env.example .env            # then edit the secrets; compose refuses to start without them
 docker compose up -d --build     # first build takes a few minutes
 ```
 
@@ -557,8 +558,8 @@ and Redis `:6379` are, on localhost only.
 | `api-gateway`, `user-service`, `wallet-service`, `transaction-service`, `notification-service` | root `Dockerfile` with `SERVICE=<module>` | JRE 21, non-root |
 | `mysql`, `kafka`, `redis` | upstream images | health-checked; services wait for MySQL and Kafka |
 
-Settings come from your shell or a `.env` file next to `docker-compose.yml`: `JWT_SECRET` (defaults to the dev secret),
-`MAIL_USERNAME` / `MAIL_PASSWORD` (unset = mails are logged by `notification-service`).
+Settings come from your shell or the `.env` file next to `docker-compose.yml` (start from `.env.example`): `MYSQL_ROOT_PASSWORD`, `DB_PASSWORD`
+and `JWT_SECRET` are **required**, `DB_USERNAME` defaults to `root`, and `MAIL_USERNAME` / `MAIL_PASSWORD` (unset = mails are logged by `notification-service`).
 
 ```bash
 docker compose logs -f notification-service    # the emails
@@ -620,7 +621,7 @@ All settings come from environment variables with local-friendly defaults.
 | `JWT_SECRET` | **required** (`local` profile has a dev value) | all | HS256 signing key, ≥ 32 bytes, identical everywhere |
 | `JWT_ISSUER` | `paymesh` | all | Expected `iss` claim |
 | `DB_URL` | `jdbc:mysql://localhost:3306/paymesh?createDatabaseIfNotExist=true` | user, wallet, transaction | Database |
-| `DB_USERNAME` / `DB_PASSWORD` | `root` / `Abc@1234` | user, wallet, transaction | Database credentials |
+| `DB_USERNAME` / `DB_PASSWORD` | **required** (`local` profile has dev values) | user, wallet, transaction | Database credentials |
 | `KAFKA_SERVERS` | `localhost:9092` | all services | Kafka bootstrap servers |
 | `USER_SERVICE_URL` / `WALLET_SERVICE_URL` / `TRANSACTION_SERVICE_URL` | `http://localhost:8081` / `:8091` / `:8086` | gateway | Route targets |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / none | gateway | Rate-limit store |
