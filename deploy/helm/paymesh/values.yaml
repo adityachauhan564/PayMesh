@@ -73,6 +73,8 @@ services:
       REDIS_HOST: redis
       # Traefik replaces any client-sent X-Forwarded-For, then wallet-ui's nginx appends Traefik's address: 2 hops.
       # Safe only because the NetworkPolicies let nothing but wallet-ui reach the gateway.
+      # Traefik sees the real client only if its Service has externalTrafficPolicy: Local; k3s's default (Cluster)
+      # SNATs every client to one node address, so all clients share one rate-limit bucket. Phase 8 sets Local.
       TRUSTED_PROXY_COUNT: "2"
 
 walletUi:

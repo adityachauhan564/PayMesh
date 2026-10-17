@@ -9,7 +9,8 @@ import org.springframework.http.server.reactive.observation.ServerRequestObserva
 /**
  * Health probes (every few seconds, forever) would bury the real request traces. Spring Security's observations of a
  * dropped probe request have no real parent (none, or the no-op one) and would start root traces, so they go too (null context = the
- * name-only pre-check).
+ * name-only pre-check). In WebFlux the request observation isn't their parent at that point even for real requests,
+ * so the gateway records no security spans at all; JWT checks show up in the services' traces instead.
  */
 @Configuration
 public class ObservationFilters {
