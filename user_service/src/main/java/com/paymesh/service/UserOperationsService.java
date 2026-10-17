@@ -7,13 +7,10 @@ import com.paymesh.dto.UserWalletCreationRequest;
 import com.paymesh.model.User;
 import com.paymesh.outbox.Outbox;
 import com.paymesh.repository.UserRepository;
-import com.paymesh.auth.AuthProperties;
 import com.paymesh.auth.TokenIssuer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -37,9 +34,6 @@ public class UserOperationsService {
     private TokenIssuer tokenIssuer;
 
     @Autowired
-    private AuthProperties authProperties;
-
-    @Autowired
     private LoginAttemptService loginAttemptService;
 
     /** The user and its wallet-creation event are committed together: no user without a wallet on the way. */
@@ -61,9 +55,6 @@ public class UserOperationsService {
         user.setUserAddress(request.address());
         user.setUserPan(request.pan());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
-        if (authProperties.isAdmin(request.emailId())) {
-            user.setRole("ADMIN");
-        }
         User savedUser = userRepository.save(user);
         log.info("User account is created for UserId: {}", savedUser.getUserId());
 
@@ -123,14 +114,6 @@ public class UserOperationsService {
 
     private String issueToken(User user) {
         return tokenIssuer.issueAccess(user, List.of("pwd"));
-    }
-
-    /** ADMIN_EMAILS also applies to accounts that existed before the setting did. */
-    @EventListener(ApplicationReadyEvent.class)
-    @Transactional
-    public void promoteAdmins() {
-        authProperties.adminEmails().stream().map(String::trim).filter(e -> !e.isEmpty())
-                .forEach(email -> userRepository.findByUserEmailId(email).ifPresent(u -> u.setRole("ADMIN")));
     }
 
     private static ResponseStatusException invalidCredentials() {

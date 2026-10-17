@@ -16,7 +16,7 @@ class TokenIssuerTest {
     @Test
     void accessTokenCarriesRolesAmrJtiAndExpiresIn15Minutes() throws Exception {
         JwtKeys keys = new JwtKeys("");
-        TokenIssuer issuer = new TokenIssuer(keys, new AuthProperties(Duration.ofMinutes(15), Duration.ofDays(7), true, List.of()), "paymesh");
+        TokenIssuer issuer = new TokenIssuer(keys, new AuthProperties(Duration.ofMinutes(15), Duration.ofDays(7), true, List.of(7L)), "paymesh");
         User user = new User();
         user.setUserId(42L);
         user.setUserFullName("Asha");
@@ -32,5 +32,28 @@ class TokenIssuerTest {
         assertThat(Duration.between(jwt.getIssuedAt(), jwt.getExpiresAt())).isEqualTo(Duration.ofMinutes(15));
         assertThat(jwt.getHeaders().get("kid")).isEqualTo(keys.signingKey().getKeyID());
         assertThat(jwt.getClaimAsString("iss")).isEqualTo("paymesh");
+    }
+
+    /** ADMIN comes from the immutable user id, never from an editable, unverified email. */
+    @Test
+    void onlyConfiguredUserIdsAreAdmins() {
+        JwtKeys keys = new JwtKeys("");
+        TokenIssuer issuer = new TokenIssuer(keys, new AuthProperties(Duration.ofMinutes(15), Duration.ofDays(7), true, List.of(7L)), "paymesh");
+        NimbusJwtDecoder decoder;
+        try {
+            decoder = NimbusJwtDecoder.withPublicKey(keys.signingKey().toRSAPublicKey()).build();
+        } catch (com.nimbusds.jose.JOSEException e) {
+            throw new IllegalStateException(e);
+        }
+        User admin = new User();
+        admin.setUserId(7L);
+        admin.setUserFullName("Ops");
+        User someone = new User();
+        someone.setUserId(8L);
+        someone.setUserFullName("Mallory");
+        someone.setUserEmailId("ops@paymesh.example");
+
+        assertThat(decoder.decode(issuer.issueAccess(admin, List.of("pwd"))).getClaimAsStringList("roles")).containsExactly("ADMIN");
+        assertThat(decoder.decode(issuer.issueAccess(someone, List.of("pwd"))).getClaimAsStringList("roles")).containsExactly("USER");
     }
 }
