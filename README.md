@@ -1,5 +1,7 @@
 # PayMesh: Event-Driven Digital Wallet Platform
 
+[![CI](https://github.com/adityachauhan564/PayMesh/actions/workflows/ci.yml/badge.svg)](https://github.com/adityachauhan564/PayMesh/actions/workflows/ci.yml)
+
 A secure, event-driven digital wallet built as **Spring Boot 4 microservices** on **Java 21**: centralized API routing through **Spring Cloud Gateway**, **JWT** authentication with **Spring Security**, asynchronous **Apache Kafka** messaging for transaction processing and notifications, **MySQL** storage, and an **Angular** web app.
 
 Users can register, add money, send money to other users by mobile number, pay bills and recharges, withdraw to a bank, set daily limits, and see their full history, with an email for every money movement.
@@ -544,7 +546,9 @@ Every error from the gateway and from services looks like this:
 
 ```bash
 cd paymesh
+cp .env.example .env            # then edit the secrets; compose refuses to start without them
 docker compose up -d --build     # first build takes a few minutes
+# Folder path has non-ASCII characters? Use: sh scripts/build-images.sh && docker compose up -d
 ```
 
 Open **http://localhost:4200**. That one port serves the app and the API (`/api/**`, proxied by nginx to the gateway), so
@@ -557,8 +561,8 @@ and Redis `:6379` are, on localhost only.
 | `api-gateway`, `user-service`, `wallet-service`, `transaction-service`, `notification-service` | root `Dockerfile` with `SERVICE=<module>` | JRE 21, non-root |
 | `mysql`, `kafka`, `redis` | upstream images | health-checked; services wait for MySQL and Kafka |
 
-Settings come from your shell or a `.env` file next to `docker-compose.yml`: `JWT_SECRET` (defaults to the dev secret),
-`MAIL_USERNAME` / `MAIL_PASSWORD` (unset = mails are logged by `notification-service`).
+Settings come from your shell or the `.env` file next to `docker-compose.yml` (start from `.env.example`): `MYSQL_ROOT_PASSWORD`, `DB_PASSWORD`
+and `JWT_SECRET` are **required**, `DB_USERNAME` defaults to `root`, and `MAIL_USERNAME` / `MAIL_PASSWORD` (unset = mails are logged by `notification-service`).
 
 ```bash
 docker compose logs -f notification-service    # the emails
@@ -570,6 +574,7 @@ docker compose down                            # stop; add -v to also wipe the d
 #### 1. Start the infrastructure
 
 ```bash
+cp .env.example .env                    # its placeholder DB password matches the local profile default
 docker compose up -d mysql kafka redis    # MySQL :3306, Kafka :9092, Redis :6379
 ```
 
@@ -620,7 +625,7 @@ All settings come from environment variables with local-friendly defaults.
 | `JWT_SECRET` | **required** (`local` profile has a dev value) | all | HS256 signing key, ≥ 32 bytes, identical everywhere |
 | `JWT_ISSUER` | `paymesh` | all | Expected `iss` claim |
 | `DB_URL` | `jdbc:mysql://localhost:3306/paymesh?createDatabaseIfNotExist=true` | user, wallet, transaction | Database |
-| `DB_USERNAME` / `DB_PASSWORD` | `root` / `Abc@1234` | user, wallet, transaction | Database credentials |
+| `DB_USERNAME` / `DB_PASSWORD` | **required** (`local` profile has dev values) | user, wallet, transaction | Database credentials |
 | `KAFKA_SERVERS` | `localhost:9092` | all services | Kafka bootstrap servers |
 | `USER_SERVICE_URL` / `WALLET_SERVICE_URL` / `TRANSACTION_SERVICE_URL` | `http://localhost:8081` / `:8091` / `:8086` | gateway | Route targets |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / none | gateway | Rate-limit store |
@@ -724,7 +729,7 @@ paymesh/
 | Wallet says *"being created"* for a long time | Kafka or wallet_service isn't running. Nothing is lost: pending events sit in `outbox_event` and go out once both are up |
 | Payment stuck at *Processing* | Same as above: check Kafka and wallet_service |
 | Login returns **429** | Too many attempts from your IP, or the account is locked; wait for `Retry-After` seconds |
-| `docker compose up --build` fails with *header key "x-docker-expose-session-sharedkey" contains value with non-printable ASCII characters* | A Docker Compose/BuildKit bug with non-ASCII characters in the folder path (e.g. an em dash). Clone into a plain ASCII folder such as `paymesh/`, or build images one at a time: `docker compose build user-service`, then the next, then `docker compose up -d` |
+| `docker compose up --build` fails with *header key "x-docker-expose-session-sharedkey" contains value with non-printable ASCII characters* | A Docker Compose/BuildKit bug when the folder path has non-ASCII characters (e.g. an em dash) and several images build at once. Run `sh scripts/build-images.sh` (builds them one at a time), then `docker compose up -d` |
 | Tests fail with a Docker error | Start Docker (Testcontainers runs MySQL and Redis for the integration tests) |
 | `npm start` fails with a Node version error | Angular 21 needs Node 20.19+ or 22.12+ |
 | UI shows *"Server is unreachable"* | The gateway (`:8080`) isn't running, or the UI isn't served through `npm start` (which proxies `/api`) |

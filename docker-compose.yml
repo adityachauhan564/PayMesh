@@ -12,17 +12,17 @@ x-spring-service: &spring-service
 
 x-service-env: &service-env
   DB_URL: jdbc:mysql://mysql:3306/paymesh?createDatabaseIfNotExist=true
-  DB_USERNAME: root
-  DB_PASSWORD: Abc@1234
+  DB_USERNAME: ${DB_USERNAME:-root}
+  DB_PASSWORD: ${DB_PASSWORD:?set it in .env (copy .env.example)}
   KAFKA_SERVERS: kafka:19092
-  # Override from the shell or a .env file; the fallback is the dev secret the "local" profile uses
-  JWT_SECRET: ${JWT_SECRET:-paymesh-local-dev-secret-change-me-in-prod}
+  # Required: set in .env (copy .env.example); compose refuses to start without it
+  JWT_SECRET: ${JWT_SECRET:?set it in .env (copy .env.example)}
 
 services:
   mysql:
     image: mysql:8.4
     environment:
-      MYSQL_ROOT_PASSWORD: Abc@1234
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set it in .env (copy .env.example)}
       MYSQL_DATABASE: paymesh
     ports: ["127.0.0.1:3306:3306"]
     volumes: [mysql-data:/var/lib/mysql]
@@ -84,7 +84,7 @@ services:
       kafka: { condition: service_healthy }
     environment:
       KAFKA_SERVERS: kafka:19092
-      JWT_SECRET: ${JWT_SECRET:-paymesh-local-dev-secret-change-me-in-prod}
+      JWT_SECRET: ${JWT_SECRET:?set it in .env (copy .env.example)}
       # Unset = mails are logged instead of sent (see notification_service)
       MAIL_USERNAME: ${MAIL_USERNAME:-}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
@@ -98,7 +98,7 @@ services:
       WALLET_SERVICE_URL: http://wallet-service:8091
       TRANSACTION_SERVICE_URL: http://transaction-service:8086
       REDIS_HOST: redis
-      JWT_SECRET: ${JWT_SECRET:-paymesh-local-dev-secret-change-me-in-prod}
+      JWT_SECRET: ${JWT_SECRET:?set it in .env (copy .env.example)}
       # Every request arrives through the wallet-ui nginx, which appends the client IP to X-Forwarded-For.
       # Safe only because the gateway port is not published: nothing can reach it around nginx.
       TRUSTED_PROXY_COUNT: 1

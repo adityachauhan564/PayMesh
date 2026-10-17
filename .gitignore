@@ -36,3 +36,8 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Local secrets (copy .env.example)
+.env
+# Superpowers plan workspaces
+.superpowers/
