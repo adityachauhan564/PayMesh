@@ -63,6 +63,15 @@ class KafkaErrorHandlingIntegrationTest {
             processed.add(message);
         }
 
+        /** Stands in for a DeadLetterConsumer whose database is briefly down: fails 4 times, then works. */
+        @KafkaListener(topics = "store-test.DLT", groupId = "store-test")
+        void deadLetterStore(String message) {
+            if (attempts.computeIfAbsent("store:" + message, k -> new AtomicInteger()).incrementAndGet() <= 4) {
+                throw new IllegalStateException("database unavailable");
+            }
+            processed.add(message);
+        }
+
         @KafkaListener(topics = "flaky-test", groupId = "flaky-test")
         void flaky(String message) {
             attempts.computeIfAbsent("flaky:" + message, k -> new AtomicInteger()).incrementAndGet();
@@ -96,6 +105,15 @@ class KafkaErrorHandlingIntegrationTest {
         awaitOn("flaky-test.DLT", payload);
 
         assertThat(listeners.attempts.get("flaky:" + payload)).hasValue(3);
+    }
+
+    @Test
+    void deadLetterConsumersKeepRetryingInsteadOfDeadLetteringAgain() {
+        String payload = "dead-" + UUID.randomUUID();
+        template.send("store-test.DLT", "k", payload);
+
+        await().atMost(Duration.ofSeconds(40)).until(() -> listeners.processed.contains(payload));
+        assertThat(listeners.attempts.get("store:" + payload)).hasValue(5);
     }
 
     @Test

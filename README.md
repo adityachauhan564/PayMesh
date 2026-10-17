@@ -337,7 +337,7 @@ sequenceDiagram
 
 1. **Retry:** every listener gets 3 attempts, 0.5 s then 1 s apart (one `DefaultErrorHandler` in `paymesh-common`). Unparseable JSON can never succeed, so it skips the retries.
 2. **Park:** the message goes to `<topic>.DLT` with the exception in its headers, and the partition moves on: one bad message never blocks the ones behind it.
-3. **Keep:** wallet_service and transaction_service consume their own DLTs into a `dead_letter` table (topic, key, payload, exception, status `NEW` / `REPLAYED` / `DISCARDED`).
+3. **Keep:** wallet_service and transaction_service consume their own DLTs into a `dead_letter` table (topic, key, payload, exception, status `NEW` / `REPLAYED` / `DISCARDED`). If storing fails (database down), the DLT consumer retries every 2 s until it works rather than dead-lettering a dead letter; only DLT partitions wait.
 4. **Replay or discard:** `DeadLetterStore.replay(id)` puts the payload back on its original topic **through the outbox**, in the same transaction as the status change, so a replay is never lost or doubled. (Admin endpoints for this arrive with the admin console.)
 
 notification_service has no database, so its failures stay on `SEND_NOTIFICATION.DLT`; replay them with the Kafka CLI.
@@ -414,7 +414,7 @@ erDiagram
 
 Schemas and users are created once, with the MySQL volume, by `deploy/mysql/init/01-service-schemas.sh`. Each service's tables come from Flyway migrations in `src/main/resources/db/migration`, and Hibernate only checks them (`ddl-auto=validate`), so a mismatch stops the service at startup instead of silently altering tables.
 
-**Schema changes:** add `V<n>__<what_changed>.sql` next to the service's existing migrations. Never edit a migration that has already run; Flyway checksums it. Enum columns are MySQL `enum(...)`, so a new enum constant needs an `ALTER TABLE ... MODIFY` migration.
+**Schema changes:** add `V<n>__<what_changed>.sql` next to the service's existing migrations. Never edit a migration that has already run; Flyway checksums it. Enum columns are MySQL `enum(...)`, so a new enum constant needs an `ALTER TABLE ... MODIFY` migration. Once a service runs more than one replica, make changes **expand then contract**: a migration must keep working for the previous version still running during a rollout (add a column as nullable or with a default, backfill, and tighten it in a later release).
 
 ---
 
