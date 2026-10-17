@@ -2,41 +2,351 @@
 
 [![CI](https://github.com/adityachauhan564/PayMesh/actions/workflows/ci.yml/badge.svg)](https://github.com/adityachauhan564/PayMesh/actions/workflows/ci.yml)
 
-A secure, event-driven digital wallet built as **Spring Boot 4 microservices** on **Java 21**: centralized API routing through **Spring Cloud Gateway**, **JWT** authentication with **Spring Security**, asynchronous **Apache Kafka** messaging for transaction processing and notifications, **MySQL** storage, and an **Angular** web app.
+PayMesh is a digital wallet built as **Spring Boot 4 microservices** on **Java 21**, with an **Angular** web app. You can register, add money, send money by mobile number, pay bills, withdraw, set daily limits, turn on two-factor login, and get an email for every money movement.
 
-Users can register, add money, send money to other users by mobile number, pay bills and recharges, withdraw to a bank, set daily limits, and see their full history, with an email for every money movement.
+It's built the way a real payments backend is built:
+- **Payments:** a **Kafka saga** with a **transactional outbox**, so no event is ever lost.
+- **Money:** a **double-entry ledger** that is reconciled every night.
+- **Retries:** **idempotency keys**, so a retry never pays twice.
+- **Auth:** **RS256 JWT** tokens with rotating refresh cookies, plus TOTP **two-factor** login.
+- **Observability:** every payment is one **OpenTelemetry trace** across all services.
+- **Deployment:** a **Helm chart** for Kubernetes.
 
 ![Java](https://img.shields.io/badge/Java-21-orange)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-6DB33F)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F)
 ![Spring Cloud Gateway](https://img.shields.io/badge/Spring%20Cloud%20Gateway-5.0-6DB33F)
 ![Angular](https://img.shields.io/badge/Angular-21-DD0031)
-![Kafka](https://img.shields.io/badge/Apache%20Kafka-3.8-231F20)
+![Kafka](https://img.shields.io/badge/Apache%20Kafka-KRaft-231F20)
 ![MySQL](https://img.shields.io/badge/MySQL-8.4-4479A1)
 ![Redis](https://img.shields.io/badge/Redis-7.4-DC382D)
+![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-Grafana%20LGTM-F46800)
+![Kubernetes](https://img.shields.io/badge/Kubernetes-Helm%20%2B%20k3d-326CE5)
 
 ---
 
 ## Contents
 
-1. [Features](#features)
-2. [Architecture at a glance](#architecture-at-a-glance)
-3. [Services](#services)
-4. [How a request travels](#how-a-request-travels)
-5. [Core flows](#core-flows): registration, payments, login
-6. [Reliability: the transactional outbox](#reliability-the-transactional-outbox)
-7. [Double-entry ledger](#double-entry-ledger)
-8. [Observability](#observability)
-9. [Data model](#data-model)
-10. [Kafka event catalogue](#kafka-event-catalogue)
-11. [Security model](#security-model)
-12. [API reference](#api-reference)
-13. [Getting started](#getting-started)
-14. [Configuration](#configuration)
-15. [Testing](#testing)
-16. [Project structure](#project-structure)
-17. [Design decisions](#design-decisions)
-18. [Known limitations and roadmap](#known-limitations-and-roadmap)
-19. [Troubleshooting](#troubleshooting)
+**Part 1: Run it**
+1. [Quick start](#quick-start)
+2. [Step 0: Prerequisites and setup](#step-0-prerequisites-and-setup)
+3. [Path A: Docker Compose](#path-a-docker-compose-easiest)
+4. [Path B: Kubernetes on k3d](#path-b-kubernetes-on-k3d-the-production-setup)
+5. [Path C: Develop from your IDE](#path-c-develop-from-your-ide)
+6. [Guided tour: try every feature](#guided-tour-try-every-feature)
+7. [Stop and clean up](#stop-and-clean-up)
+8. [Run the tests](#run-the-tests)
+9. [Troubleshooting](#troubleshooting)
+
+**Part 2: How it works**
+
+10. [Features](#features)
+11. [Architecture at a glance](#architecture-at-a-glance)
+12. [Services](#services)
+13. [How a request travels](#how-a-request-travels)
+14. [Core flows](#core-flows): registration, payments, login
+15. [Reliability: the transactional outbox](#reliability-the-transactional-outbox)
+16. [Double-entry ledger](#double-entry-ledger)
+17. [Observability](#observability)
+18. [Kubernetes deployment](#kubernetes-deployment)
+19. [Data model](#data-model)
+20. [Kafka event catalogue](#kafka-event-catalogue)
+21. [Security model](#security-model)
+
+**Part 3: Reference**
+
+22. [API reference](#api-reference)
+23. [Configuration](#configuration)
+24. [Testing](#testing)
+25. [Project structure](#project-structure)
+26. [Design decisions](#design-decisions)
+27. [Known limitations and roadmap](#known-limitations-and-roadmap)
+
+---
+
+# Part 1: Run it
+
+## Quick start
+
+You only need Docker. Three commands start the whole stack:
+
+```bash
+git clone https://github.com/adityachauhan564/PayMesh.git && cd PayMesh
+cp .env.example .env
+docker compose up -d --build
+```
+
+Open **http://localhost:4200**, create an account, and follow the [guided tour](#guided-tour-try-every-feature).
+
+Choose how you want to run it:
+
+| Path | Best for | What you need | App URL | Grafana |
+|---|---|---|---|---|
+| **A. Docker Compose** | trying it out | Docker | http://localhost:4200 | http://localhost:3000 |
+| **B. Kubernetes (k3d)** | seeing the production setup | Docker, k3d, Helm, kubectl | http://localhost:8080 | via port-forward |
+| **C. IDE** | changing the code | Docker, Java 21, Node 22 | http://localhost:4200 | none (export is off) |
+
+## Step 0: Prerequisites and setup
+
+**1. Install the tools for your path.**
+
+| Tool | Version | Needed for | Check with |
+|---|---|---|---|
+| [Docker](https://docs.docker.com/get-docker/) (Docker Desktop on Windows/macOS) | any recent; give it **8 GB** of memory for path B | all paths | `docker version` |
+| [Java](https://adoptium.net) | 21 | path C and the tests (the Maven wrapper is included) | `java -version` |
+| [Node.js](https://nodejs.org) | 20.19+ or 22.12+ | path C (Angular dev server) | `node -v` |
+| [k3d](https://k3d.io/#installation) | 5.x | path B | `k3d version` |
+| [Helm](https://helm.sh/docs/intro/install/) | 3.8+ | path B | `helm version` |
+| kubectl | any recent (Docker Desktop includes it) | path B | `kubectl version --client` |
+
+> **Windows:** run the commands in **Git Bash** (it comes with [Git for Windows](https://git-scm.com/download/win)). For k3d and Helm, download the `.exe` from their GitHub releases into a folder on your `PATH`, such as `~/bin`.
+
+**2. Get the code.**
+
+```bash
+git clone https://github.com/adityachauhan564/PayMesh.git
+cd PayMesh
+```
+
+**3. Create your `.env`.** It holds the secrets, and Compose and the k3d script both refuse to start without it.
+
+```bash
+cp .env.example .env
+```
+
+The placeholder values work as they are for local runs. These are the optional settings:
+
+| Setting | Leave empty and… | Set it to… |
+|---|---|---|
+| `JWT_PRIVATE_KEY` | user-service creates a new signing key on every start (the web app quietly refreshes your session) | a key that stays the same across restarts: `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048`, on **one line**, unquoted |
+| `MAIL_USERNAME` / `MAIL_PASSWORD` | emails are written to notification-service's log | send real emails (Gmail address + [App Password](https://support.google.com/accounts/answer/185833)) |
+| `ADMIN_USER_IDS` | nobody is an admin | comma-separated user ids that get the ADMIN role |
+
+## Path A: Docker Compose (easiest)
+
+**Step 1: Build and start everything.**
+
+```bash
+docker compose up -d --build        # the first build takes a few minutes
+```
+
+> If your folder path contains non-ASCII characters (for example an em dash), the parallel build fails. Build one image at a time instead: `sh scripts/build-images.sh && docker compose up -d`.
+
+**Step 2: Wait until it's up.** All containers should show `running`, and MySQL and Kafka should show `healthy`.
+
+```bash
+docker compose ps
+```
+
+The Spring services take about 30–60 s to start. When `curl -s localhost:4200/api/users/me` returns a `401` JSON error, the API is ready.
+
+**Step 3: Open the app.** Go to **http://localhost:4200**, then take the [guided tour](#guided-tour-try-every-feature).
+
+**Step 4: Open Grafana.** Go to **http://localhost:3000** (admin / admin) to see dashboards, traces and logs.
+
+**What's running:**
+
+| Container | Port on localhost | Notes |
+|---|---|---|
+| `wallet-ui` | **4200** | nginx serving the Angular app, with `/api` proxied to the gateway: the only way into the app |
+| `lgtm` | **3000** | Grafana with Prometheus, Loki and Tempo |
+| `api-gateway`, `user-service`, `wallet-service`, `transaction-service`, `notification-service` | not published | root `Dockerfile` with `SERVICE=<module>`; JRE, non-root |
+| `mysql`, `kafka`, `redis` | 3306, 9092, 6379 | published for IDE runs; health-checked, and services wait for MySQL and Kafka |
+
+Handy commands:
+
+```bash
+docker compose logs -f notification-service    # the emails
+docker compose logs -f wallet-service          # payments being applied
+```
+
+## Path B: Kubernetes on k3d (the production setup)
+
+This runs the **same Helm chart** that runs in production. [k3d](https://k3d.io) runs a k3s cluster inside Docker. One script does all of it:
+- creates the cluster;
+- installs the Strimzi Kafka operator;
+- builds the images and loads them into the cluster;
+- turns `.env` into a Kubernetes Secret;
+- installs the chart and waits for every rollout.
+
+**Step 1: Run the script.**
+
+```bash
+sh scripts/k3d-up.sh               # about 5–10 minutes the first time
+```
+
+It finishes with `PayMesh is up: http://localhost:8080`.
+
+**Step 2: Check the pods.** All 11 should be `Running` and `1/1`:
+
+```bash
+kubectl -n paymesh get pods
+```
+
+A few restarts of the Spring services on the first start are normal. They start before MySQL and Kafka are ready, and Kubernetes restarts them.
+
+**Step 3: Open the app.** Go to **http://localhost:8080**, then take the [guided tour](#guided-tour-try-every-feature).
+
+**Step 4: Open Grafana.** Keep this running in a second terminal, then open **http://localhost:3000** (admin / admin):
+
+```bash
+kubectl -n paymesh port-forward svc/lgtm 3000:3000
+```
+
+**Step 5 (optional): Look around the cluster.**
+
+```bash
+kubectl -n paymesh get hpa                       # transaction-service autoscaling (CPU)
+kubectl -n paymesh get networkpolicies           # who may talk to whom
+kubectl -n paymesh top pods                      # memory per pod (about 3.2 GB in total)
+kubectl -n paymesh logs deploy/notification-service --tail=30   # the emails
+```
+
+**After code changes,** run `sh scripts/k3d-up.sh` again. It rebuilds and re-imports the images and restarts the services. [Kubernetes deployment](#kubernetes-deployment) explains what's in the chart.
+
+## Path C: Develop from your IDE
+
+**Step 1: Start only the infrastructure in Docker.**
+
+```bash
+docker compose up -d mysql kafka redis    # MySQL :3306, Kafka :9092, Redis :6379
+```
+
+The `local` Spring profile connects as `user_svc` / `wallet_svc` / `txn_svc` to `user_db` / `wallet_db` / `txn_db`. Compose's MySQL creates these on its first start, with the passwords from `.env`. The placeholders already match the profile's defaults.
+
+> Already have MySQL on port 3306? Start only `kafka redis`. Then create the schemas and users on your own MySQL with the SQL in `deploy/helm/paymesh/files/mysql-init/01-service-schemas.sh`, and point the services at it with `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`.
+
+**Step 2: Build the backend.**
+
+```bash
+./mvnw -q install -DskipTests            # Windows cmd: mvnw.cmd -q install -DskipTests
+```
+
+**Step 3: Start the services, with user-service first.** The others fetch its public signing keys from `http://localhost:8081/.well-known/jwks.json`. Run each in its own terminal, or run the main classes from your IDE with the `local` profile:
+
+```bash
+java -jar user_service/target/user_service-0.0.1-SNAPSHOT.jar                 --spring.profiles.active=local
+java -jar wallet_service/target/wallet_service-0.0.1-SNAPSHOT.jar             --spring.profiles.active=local
+java -jar transaction_service/target/transaction_service-0.0.1-SNAPSHOT.jar   --spring.profiles.active=local
+java -jar notification_service/target/notification_service-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
+java -jar api_gateway/target/api_gateway-0.0.1-SNAPSHOT.jar                   --spring.profiles.active=local
+```
+
+**Step 4: Start the web app.**
+
+```bash
+cd wallet-ui
+npm install
+npm start                    # http://localhost:4200, proxies /api to the gateway on :8080
+```
+
+Without `JWT_PRIVATE_KEY`, each user-service restart creates a new signing key. The web app refreshes its token by itself; for curl, log in again. To also see traces in Grafana, start the `lgtm` container and run the services with `OTLP_ENABLED=true`.
+
+## Guided tour: try every feature
+
+The steps are the same for every path; only the address changes: **http://localhost:4200** for paths A and C, **http://localhost:8080** for path B.
+
+**1. Create an account.** Choose **Create account** and enter:
+- a name;
+- a 10-digit mobile number starting with 6–9;
+- an email;
+- a password of at least 8 characters.
+
+You're logged in straight away. The dashboard shows *"being created"* for a moment, then your ₹0.00 wallet. The wallet is created asynchronously, through Kafka.
+
+**2. Add money.** On the dashboard, click **Add money**, enter ₹1000, and pay. The status moves from *Processing* to *Payment successful* within a second or two, and the balance updates.
+
+**3. Create a second user.** Open a **private/incognito window** and register again, with another mobile number and email.
+
+**4. Send money.** In the first window, click **Send money**. Enter the second user's mobile number, confirm their name, and send ₹250. Both balances change. Each user gets an email: see the notification-service log, or your inbox if mail is set up.
+
+**5. See a clean rejection.** Click **Withdraw** and try to take out more than your balance. The payment is *rejected* with the reason, and no money moves.
+
+**6. Pay a bill.** Click **Recharge & bills**, for example a mobile recharge of ₹299.
+
+**7. Check History.** Every payment is listed, newest first. Click one for its details.
+
+**8. Set daily limits.** Go to **Profile → Wallet limits**, lower your daily limit, save it, then try to go over it.
+
+**9. Turn on two-factor login.** Go to **Profile → Two-factor login → Set up**:
+1. Enter your password and scan the QR code with any authenticator app (Google Authenticator, Authy, …).
+2. Enter a code.
+3. Click **Turn on**.
+4. Save the 8 recovery codes.
+
+You're signed out everywhere. Log in again: now you need the code as well.
+
+**10. Step-up for large payments.** With two-factor on, send more than ₹5,000. The app asks for a fresh code before it pays.
+
+**11. See the account lockout.** In another browser, enter a wrong password 5 times. The account is locked for 15 minutes, and a lockout email with a one-time **unlock link** is queued. The link isn't in the log at the default level: it shows only the subject and a masked address. To get it, set `MAIL_USERNAME` / `MAIL_PASSWORD`, or turn on DEBUG logging for notification-service.
+
+**12. Follow a payment in Grafana** (paths A and B):
+1. **Dashboards → PayMesh → Payments** shows completed payments, and saga time at p50/p95/p99.
+2. **Messaging & ledger** shows the outbox backlog, dead letters and ledger mismatches.
+3. **Explore → Tempo**: search service `api-gateway` and open a `http post` trace. A single payment is **one trace** through the gateway, transaction-service, the outbox, Kafka, wallet-service and notification-service.
+4. **Explore → Loki**: `{service_name="wallet-service"}`. Each log line links to its trace. Emails and mobile numbers appear masked.
+
+**13. Use the API directly** (optional). The address changes with the path:
+
+| Path | API base URL |
+|---|---|
+| A | `http://localhost:4200/api` |
+| B | `http://localhost:8080/api` |
+| C | `http://localhost:8080/api` (the gateway itself) |
+
+```bash
+BASE=http://localhost:4200/api
+TOKEN=$(curl -s -X POST $BASE/auth/login -H 'Content-Type: application/json' \
+  -d '{"username":"<your email or mobile>","password":"<your password>"}' | jq -r .token)
+curl -s $BASE/wallets/me -H "Authorization: Bearer $TOKEN"
+```
+
+The [API reference](#api-reference) has more examples.
+
+## Stop and clean up
+
+| Path | Stop (keeps data) | Remove everything |
+|---|---|---|
+| A | `docker compose stop` | `docker compose down -v` (`-v` also deletes the database volume) |
+| B | `k3d cluster stop paymesh` (`k3d cluster start paymesh` to resume) | `k3d cluster delete paymesh` |
+| C | stop the Java processes and `npm start`, then `docker compose stop` | `docker compose down -v` |
+
+## Run the tests
+
+```bash
+./mvnw verify                      # backend: unit + integration tests (Docker must be running: Testcontainers)
+cd wallet-ui && npm test           # web app (Vitest)
+helm lint deploy/helm/paymesh      # the Helm chart
+```
+
+CI (GitHub Actions) runs all three, and also builds every Docker image, on each pull request. [Testing](#testing) describes what's covered.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| API calls (curl, Postman) are `401` right after restarting user_service | Without `JWT_PRIVATE_KEY` it generated a new signing key, so older access tokens no longer verify. The web app refreshes automatically; for curl, log in again or call `/api/auth/refresh` (set `JWT_PRIVATE_KEY` to keep one key across restarts) |
+| `Access denied for user 'user_svc'` (or `wallet_svc`, `txn_svc`) or `Unknown database 'user_db'` after upgrading | Your `mysql-data` volume predates the per-service schemas, and init scripts only run on a new volume. `docker compose down -v` (this **wipes local data**), then start again |
+| `Access denied for user '...'@'localhost'` from the IDE | Your MySQL has different credentials: set `DB_USERNAME` / `DB_PASSWORD` (and `DB_URL` if not on 3306) |
+| Wallet says *"being created"* for a long time | Kafka or wallet_service isn't running. Nothing is lost: pending events sit in `outbox_event` and go out once both are up |
+| Payment stuck at *Processing* | Same as above: check Kafka and wallet_service |
+| Login returns **429** | Too many attempts from your IP, or the account is locked; wait for `Retry-After` seconds |
+| `docker compose up --build` fails with *header key "x-docker-expose-session-sharedkey" contains value with non-printable ASCII characters* | A Docker Compose/BuildKit bug when the folder path has non-ASCII characters (e.g. an em dash) and several images build at once. Run `sh scripts/build-images.sh` (builds them one at a time), then `docker compose up -d` |
+| Tests fail with a Docker error | Start Docker (Testcontainers runs MySQL and Redis for the integration tests) |
+| `npm start` fails with a Node version error | Angular 21 needs Node 20.19+ or 22.12+ |
+| UI shows *"Server is unreachable"* | The gateway (`:8080`) isn't running, or the UI isn't served through `npm start` (which proxies `/api`) |
+| No emails arrive | Without `MAIL_USERNAME` / `MAIL_PASSWORD` they're printed in the notification_service log instead |
+| Compose: `mysql` won't start, *port is already allocated* | Something else (often a locally installed MySQL) holds port 3306. Stop it, or remove the `ports:` line of `mysql` in `docker-compose.yml` (the services reach it over the compose network either way) |
+| Grafana shows no data | Wait a minute after the first requests (metrics export every 10 s); check the `lgtm` container/pod is running |
+| k3d: `k3d-up.sh` fails at *create secret* | `.env` is missing, or `JWT_PRIVATE_KEY` spans several lines or is quoted: put it on one line, unquoted |
+| k3d: pods restart a few times at first | Normal on the first start: services that start before MySQL or Kafka is ready exit, and Kubernetes restarts them |
+| k3d: pods stay `Pending` or get `OOMKilled` | Docker has too little memory: give Docker Desktop 8 GB (Settings → Resources) |
+| k3d: http://localhost:8080 doesn't answer | Port 8080 is taken by something else, or the cluster is stopped (`k3d cluster start paymesh`) |
+
+---
+
+# Part 2: How it works
 
 ---
 
@@ -53,7 +363,12 @@ Users can register, add money, send money to other users by mobile number, pay b
 | 📜 | **History** | Paginated, with full details per transaction |
 | ✉️ | **Email notifications** | Welcome, every debit and credit, failed payments, account locked |
 | 🛡️ | **Security** | JWT auth at gateway **and** service, per-IP login rate limit, per-account lockout, ownership checks everywhere |
-| 🔁 | **Reliability** | No event is ever lost: works through Kafka outages and catches up automatically |
+| 🔐 | **Sessions and two-factor** | 15-minute RS256 access tokens, rotating refresh cookie, instant logout; optional TOTP two-factor with recovery codes; step-up code for payments over ₹5,000 |
+| 🔁 | **Reliability** | No event is ever lost: works through Kafka outages and catches up automatically; failed messages are parked and kept for replay |
+| 📒 | **Double-entry ledger** | Every payment posts balanced debits and credits; a nightly reconciliation proves balances match |
+| ♻️ | **Idempotent payments** | An `Idempotency-Key` makes retries (double clicks, timeouts) safe: never two payments |
+| 📈 | **Observability** | Traces, logs and metrics in Grafana; one trace per payment; dashboards and alerts as code; personal data masked |
+| ☸️ | **Kubernetes** | One Helm chart: probes, hardened pods, NetworkPolicies, autoscaling; runs locally on k3d |
 
 ---
 
@@ -69,7 +384,7 @@ flowchart TB
     gw --> ws["wallet_service · :8091"]
     gw --> ts["transaction_service · :8086"]
 
-    us --> db[("MySQL · paymesh")]
+    us --> db[("MySQL · one schema per service")]
     ws --> db
     ts --> db
 
@@ -118,7 +433,7 @@ flowchart LR
 | **`paymesh-common`** | n/a | Shared code: event DTOs, topics, JWT validation, error handling, log correlation, **transactional outbox**, Kafka retries and dead letters | `outbox_event`, `dead_letter` (in each service's schema) | n/a | n/a |
 | **`wallet-ui`** | 4200 | Angular app: login and register, dashboard, pay, history, profile | n/a | n/a | n/a |
 
-All services share **one MySQL database** for simplicity, but each touches only its own tables and none uses another's, so they can be split into separate databases without code changes.
+Each service has **its own schema and MySQL user** on one MySQL server (`user_db`, `wallet_db`, `txn_db`) and can't read the others' tables, so they could move to separate servers without code changes.
 
 ---
 
@@ -376,7 +691,7 @@ A balance column says *what* a wallet holds, never *why*. Every successful payme
 
 ## Observability
 
-Every service sends **traces, logs and metrics** over OpenTelemetry (OTLP) to one collector; in compose that's the `lgtm` container: Grafana with Tempo (traces), Loki (logs) and Prometheus (metrics). Open **http://localhost:3000** (admin / admin).
+Every service sends **traces, logs and metrics** over OpenTelemetry (OTLP) to one collector, the `lgtm` container (in Compose and in the Helm chart): Grafana with Tempo (traces), Loki (logs) and Prometheus (metrics). Open **http://localhost:3000** (admin / admin; on k3d, port-forward first).
 
 **One payment, one trace.** A transfer shows up in Tempo as a single trace across every hop, including the two Kafka round trips:
 
@@ -407,7 +722,43 @@ Plus HTTP, JVM, and Kafka client metrics (consumer lag included). Tags stay low-
 
 **Emails and mobile numbers are masked before storage.** The collector's `transform/scrub` step masks email addresses and Indian mobile numbers (with or without `+91`/`0`) in every log line, log and span attribute, span name and span event (exception messages) before anything is written, and notification_service logs a mail it isn't sending with a masked recipient and no body (the full text only at DEBUG). Scheduled pollers and health probes aren't traced, so they don't bury real requests.
 
-Export is off by default (`OTLP_ENABLED=false`), so tests and plain IDE runs don't look for a collector; compose turns it on. Export is batched and asynchronous: with the collector down, requests are unaffected.
+Export is off by default (`OTLP_ENABLED=false`), so tests and plain IDE runs don't look for a collector; Compose and the Helm chart turn it on. Export is batched and asynchronous: with the collector down, requests are unaffected.
+
+---
+
+## Kubernetes deployment
+
+The Helm chart in `deploy/helm/paymesh` is the one that runs in production (k3s on AWS), and it runs locally on k3d ([Path B](#path-b-kubernetes-on-k3d-the-production-setup)).
+
+```mermaid
+flowchart LR
+    browser(["Browser"]) --> traefik["Traefik ingress"]
+    traefik --> ui["wallet-ui (nginx)"]
+    ui -- "/api" --> gw["api-gateway"]
+    gw --> us["user-service"] & ws["wallet-service"] & ts["transaction-service<br/>HPA 1–3"]
+    us & ws & ts --> mysql[("MySQL<br/>StatefulSet + PVC")]
+    us & ws & ts & ns["notification-service"] <-.-> kafka{{"Kafka<br/>Strimzi, KRaft"}}
+    gw & us & ns --> redis[("Redis")]
+    us & ws & ts & ns & gw -. OTLP .-> lgtm["Grafana LGTM"]
+```
+
+| In the cluster (namespace `paymesh`) | How |
+|---|---|
+| 5 Spring services | one shared Deployment template with a values entry each; actuator liveness, readiness and startup probes; non-root, read-only root filesystem; 512 Mi each (`-XX:+UseSerialGC -XX:MaxRAMPercentage=60`) |
+| wallet-ui | nginx with `/api` proxied to the gateway, behind Traefik (k3s's ingress) |
+| Kafka | Strimzi operator, one KRaft node (controller + broker); topics auto-created |
+| MySQL | StatefulSet with a persistent volume; the same init script as compose |
+| Redis, Grafana LGTM | Deployments (their data is disposable) |
+| Secrets | `paymesh-secrets`, created from `.env` by the script; the chart only references it |
+
+- **NetworkPolicies:** everything is denied unless allowed:
+  - Traefik can reach wallet-ui, wallet-ui can reach the gateway, and the gateway can reach the services.
+  - The services can reach user-service (for its signing keys), their own data stores and Grafana.
+  - Any other pod is refused, even inside the namespace.
+- **Autoscaling:** transaction-service scales from 1 to 3 pods at 70% CPU. Scale-up waits 3 minutes, so JVM warm-up alone doesn't add pods.
+- **Rollouts:** wallet-service uses `Recreate`, so two versions never run against the ledger at once.
+- **Memory:** about 3.2 GB in total for the whole stack.
+- **Client IP:** the gateway trusts two proxies (Traefik, then nginx) for `X-Forwarded-For`. In production, Traefik's Service needs `externalTrafficPolicy: Local`; otherwise every client looks like the node and shares one login rate-limit bucket.
 
 ---
 
@@ -580,9 +931,13 @@ Only the gateway (and the static UI) may be reachable from the internet. Use no 
 
 ---
 
+# Part 3: Reference
+
+---
+
 ## API reference
 
-Base URL: `http://localhost:8080` (the gateway). All bodies are JSON. 🔒 = needs `Authorization: Bearer <token>`.
+Base URL: the gateway, `http://localhost:8080` (IDE runs and k3d); with Docker Compose use `http://localhost:4200`, which proxies `/api` to it. All bodies are JSON. 🔒 = needs `Authorization: Bearer <token>`.
 
 ### Auth and users (user_service)
 
@@ -676,119 +1031,6 @@ Every error from the gateway and from services looks like this:
 
 ---
 
-## Getting started
-
-### Prerequisites
-
-| Tool | Version | Used for |
-|---|---|---|
-| Docker | any recent | everything in containers; MySQL, Kafka, Redis and the integration tests otherwise |
-| Java | 21+ | only to run or test services outside Docker (Maven wrapper included) |
-| Node.js | 20.19+ or 22.12+ | only to run the Angular dev server |
-
-### Option A: everything in Docker (one command)
-
-```bash
-cd paymesh
-cp .env.example .env            # then edit the secrets; compose refuses to start without them
-docker compose up -d --build     # first build takes a few minutes
-# Folder path has non-ASCII characters? Use: sh scripts/build-images.sh && docker compose up -d
-```
-
-Open **http://localhost:4200**. That one port serves the app and the API (`/api/**`, proxied by nginx to the gateway), so
-`curl http://localhost:4200/api/...` works too. Services and the gateway are not published; MySQL `:3306`, Kafka `:9092`
-and Redis `:6379` are, on localhost only.
-
-| Container | Built from | Notes |
-|---|---|---|
-| `wallet-ui` | `wallet-ui/Dockerfile` | nginx: Angular app + `/api` proxy; the only way in |
-| `api-gateway`, `user-service`, `wallet-service`, `transaction-service`, `notification-service` | root `Dockerfile` with `SERVICE=<module>` | JRE 21, non-root |
-| `mysql`, `kafka`, `redis` | upstream images | health-checked; services wait for MySQL and Kafka |
-
-Settings come from your shell or the `.env` file next to `docker-compose.yml` (start from `.env.example`): `MYSQL_ROOT_PASSWORD`,
-`USER_DB_PASSWORD`, `WALLET_DB_PASSWORD` and `TXN_DB_PASSWORD` are **required**; `JWT_PRIVATE_KEY` is optional (empty = a new signing key per start), and `MAIL_USERNAME` / `MAIL_PASSWORD` (unset = mails are logged by `notification-service`).
-
-```bash
-docker compose logs -f notification-service    # the emails
-docker compose down                            # stop; add -v to also wipe the database
-```
-
-### Option B: develop locally (services from your IDE)
-
-#### 1. Start the infrastructure
-
-```bash
-cp .env.example .env                    # its placeholder DB password matches the local profile default
-docker compose up -d mysql kafka redis    # MySQL :3306, Kafka :9092, Redis :6379
-```
-
-The `local` profile connects as `user_svc` / `wallet_svc` / `txn_svc` to `user_db` / `wallet_db` / `txn_db`, which compose's MySQL creates on its first start.
-
-> Already have MySQL on 3306? Start only the rest (`docker compose up -d kafka redis`), run `deploy/helm/paymesh/files/mysql-init/01-service-schemas.sh`'s SQL against yours (or create the three schemas and users yourself), and point the services at it with `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`.
-
-#### 2. Build and start the backend
-
-```bash
-./mvnw -q install -DskipTests            # Windows: mvnw.cmd -q install -DskipTests
-```
-
-Then start each app in its own terminal, or run the main classes from your IDE with the `local` profile:
-
-```bash
-java -jar user_service/target/user_service-0.0.1-SNAPSHOT.jar                 --spring.profiles.active=local
-java -jar wallet_service/target/wallet_service-0.0.1-SNAPSHOT.jar             --spring.profiles.active=local
-java -jar transaction_service/target/transaction_service-0.0.1-SNAPSHOT.jar   --spring.profiles.active=local
-java -jar notification_service/target/notification_service-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
-java -jar api_gateway/target/api_gateway-0.0.1-SNAPSHOT.jar                   --spring.profiles.active=local
-```
-
-Start user_service first: the other services fetch its public signing keys from `http://localhost:8081/.well-known/jwks.json` on their first request (`JWT_JWKS_URI`). Without `JWT_PRIVATE_KEY`, user_service generates a new key per start: access tokens from before the restart stop verifying, and the web app quietly gets a new one through its refresh cookie (refresh tokens are database rows, so sessions survive).
-
-#### 3. Start the web app
-
-```bash
-cd wallet-ui
-npm install
-npm start                    # http://localhost:4200, proxies /api to the gateway on :8080
-```
-
-### Option C: Kubernetes on k3d (the production chart, locally)
-
-The Helm chart in `deploy/helm/paymesh` is the one that runs in production (k3s on AWS). [k3d](https://k3d.io) runs k3s inside Docker, so the same chart runs on your machine:
-
-```bash
-cp .env.example .env          # the script turns it into the paymesh-secrets Secret
-sh scripts/k3d-up.sh          # cluster + Strimzi + images + chart → http://localhost:8080
-kubectl -n paymesh port-forward svc/lgtm 3000:3000   # Grafana (admin/admin)
-k3d cluster delete paymesh    # remove everything
-```
-
-You need Docker (8 GB for Docker Desktop), [k3d](https://k3d.io), [Helm](https://helm.sh) 3.8 or later, and kubectl. Re-run the script after code changes: it rebuilds the images, imports them and restarts the services.
-
-| In the cluster (namespace `paymesh`) | How |
-|---|---|
-| 5 Spring services | one shared Deployment template, a values entry each; actuator liveness/readiness/startup probes; non-root, read-only root filesystem; 512 Mi each (`-XX:+UseSerialGC -XX:MaxRAMPercentage=60`) |
-| wallet-ui | nginx with `/api` proxied to the gateway, behind Traefik (k3s's ingress) |
-| Kafka | Strimzi operator, one KRaft node (controller + broker) |
-| MySQL | StatefulSet with a persistent volume; same init script as compose |
-| Redis, Grafana LGTM | Deployments (their data is disposable) |
-
-- **NetworkPolicies:** everything is denied unless allowed. Traefik can reach wallet-ui, wallet-ui can reach the gateway, and the gateway can reach the services. The services can reach user-service (for its signing keys), their own data stores and Grafana. Any other pod is refused, even inside the namespace.
-- **Autoscaling:** transaction-service scales from 1 to 3 pods at 70% CPU. Scale-up waits 3 minutes, so JVM warm-up alone doesn't add pods.
-- **Rollouts:** wallet-service uses `Recreate`, so two versions never run against the ledger at once.
-- **Memory:** about 3.2 GB in total for the whole stack.
-- **First start:** services that start before MySQL or Kafka is ready exit, and Kubernetes restarts them. A few restarts on the first start are normal.
-
-### Try it
-
-1. Open http://localhost:4200 and **create an account**. The dashboard shows "being created" for a moment, then your ₹0.00 wallet.
-2. **Add money**, then register a second user in a private window.
-3. **Send money** to the second user's mobile number, watch the status go from *Processing* to *Payment successful*.
-4. Try to **withdraw** more than you have to see a clean rejection, and check **History** for details.
-5. Emails appear in the `notification_service` log (or in your inbox, if SMTP is configured).
-
----
-
 ## Configuration
 
 All settings come from environment variables with local-friendly defaults.
@@ -814,7 +1056,7 @@ All settings come from environment variables with local-friendly defaults.
 | `USER_SERVICE_URL` / `WALLET_SERVICE_URL` / `TRANSACTION_SERVICE_URL` | `http://localhost:8081` / `:8091` / `:8086` | gateway | Route targets |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / none | gateway | Rate-limit store |
 | `LOGIN_RATE_LIMIT_BURST_CAPACITY` / `…_REQUESTED_TOKENS` / `…_REPLENISH_RATE` | `60` / `12` / `1` | gateway | Token bucket: 5 attempts at once, then 1 every 12 s |
-| `TRUSTED_PROXY_COUNT` | `0` | gateway | Proxies in front of the gateway (set `1` behind a load balancer) |
+| `TRUSTED_PROXY_COUNT` | `0` (compose: `1`, Helm: `2`) | gateway | Proxies in front of the gateway that append to `X-Forwarded-For` |
 | `LOGIN_LOCKOUT_MAX_FAILED_ATTEMPTS` / `LOGIN_LOCKOUT_DURATION` | `5` / `15m` | user | Account lockout policy |
 | `MAIL_HOST` / `MAIL_PORT` | `smtp.gmail.com` / `587` | notification | SMTP server |
 | `MAIL_USERNAME` / `MAIL_PASSWORD` | unset, so emails are only logged | notification | SMTP login (Gmail: use an App Password) |
@@ -825,10 +1067,6 @@ Advanced (Spring properties): `outbox.poll-interval-ms` (default `250`), `spring
 
 ## Testing
 
-```bash
-./mvnw test        # Docker must be running: integration tests use Testcontainers
-```
-
 The suite runs against **real** infrastructure wherever correctness depends on it: MySQL for locking, isolation and column sizes, and Redis for rate limiting. Several bugs that mocked tests missed were caught this way.
 
 | Module | What's covered |
@@ -837,7 +1075,9 @@ The suite runs against **real** infrastructure wherever correctness depends on i
 | `paymesh-common` | Shared JWT validation; secret checks; log correlation filter; Kafka producer defaults; payload-free failure logging; **outbox**: refuses calls outside a transaction, all-or-nothing with the data, in-order relay, stops at the first failure, ignores other services' rows, large payloads, never blocks writers |
 | `user_service` | Token issuance (`iss`, `sub`); ownership; registration queues wallet creation; lockout rules, 429 + `Retry-After`, correct password refused while locked, exactly one email per lock; real MySQL: 12 parallel guesses give one lock and one email; Kafka outage keeps the registration event |
 | `wallet_service` | Debit and limit rules; payment results and emails queued with the change; duplicates ignored; ownership |
-| `transaction_service` | Sender taken from the token, never the body; payment queued with its event; not-yours gives 404; history scoped to the caller |
+| `transaction_service` | Sender taken from the token, never the body; payment queued with its event; not-yours gives 404; history scoped to the caller; idempotency keys (replay, conflicting body, concurrent duplicates); metrics |
+| `wallet_service` (ledger) | jqwik properties over generated payments (always balanced, right accounts); journal written once per payment; reconciliation finds tampered balances; one trace through the outbox |
+| `wallet-ui` | Vitest: API client and token refresh, unlock page, profile (two-factor) |
 
 ---
 
@@ -866,7 +1106,9 @@ paymesh/
 │   └── src/app/
 │       ├── api.ts               HTTP client, JWT interceptor, auth guard, types
 │       └── pages/               auth · dashboard · pay · history · profile · txn-list
-├── deploy/helm/paymesh/         Helm chart (Kubernetes); files/ holds the MySQL init script and Grafana config
+├── deploy/helm/paymesh/         Helm chart (Kubernetes)
+│   ├── templates/               services, wallet-ui + ingress, mysql, redis, kafka (Strimzi), lgtm, NetworkPolicies
+│   └── files/                   MySQL init script; collector config, dashboards, alerts (also mounted by compose)
 ├── scripts/k3d-up.sh            runs the whole stack on a local k3d cluster
 ├── scripts/build-images.sh      builds compose images one at a time (non-ASCII path workaround)
 ├── .env.example                 secrets template for compose (copy to .env)
@@ -908,22 +1150,5 @@ paymesh/
 - **Notification dead letters** stay on `SEND_NOTIFICATION.DLT` (notification_service has no database); replay them with the Kafka CLI.
 - **Lockout can be abused**: someone who knows a mobile number can keep locking that account. The owner can unlock it straight away from the email link; a CAPTCHA after failures would stop the nuisance itself.
 - **Users behind one shared IP** (office, mobile carrier NAT) share a login rate-limit bucket.
-- **Simulated bank**: add money and withdraw don't call a real payment gateway.
-
----
-
-## Troubleshooting
-
-| Symptom | Cause and fix |
-|---|---|
-| API calls (curl, Postman) are `401` right after restarting user_service | Without `JWT_PRIVATE_KEY` it generated a new signing key, so older access tokens no longer verify. The web app refreshes automatically; for curl, log in again or call `/api/auth/refresh` (set `JWT_PRIVATE_KEY` to keep one key across restarts) |
-| `Access denied for user 'user_svc'` (or `wallet_svc`, `txn_svc`) or `Unknown database 'user_db'` after upgrading | Your `mysql-data` volume predates the per-service schemas, and init scripts only run on a new volume. `docker compose down -v` (this **wipes local data**), then start again |
-| `Access denied for user '...'@'localhost'` from the IDE | Your MySQL has different credentials: set `DB_USERNAME` / `DB_PASSWORD` (and `DB_URL` if not on 3306) |
-| Wallet says *"being created"* for a long time | Kafka or wallet_service isn't running. Nothing is lost: pending events sit in `outbox_event` and go out once both are up |
-| Payment stuck at *Processing* | Same as above: check Kafka and wallet_service |
-| Login returns **429** | Too many attempts from your IP, or the account is locked; wait for `Retry-After` seconds |
-| `docker compose up --build` fails with *header key "x-docker-expose-session-sharedkey" contains value with non-printable ASCII characters* | A Docker Compose/BuildKit bug when the folder path has non-ASCII characters (e.g. an em dash) and several images build at once. Run `sh scripts/build-images.sh` (builds them one at a time), then `docker compose up -d` |
-| Tests fail with a Docker error | Start Docker (Testcontainers runs MySQL and Redis for the integration tests) |
-| `npm start` fails with a Node version error | Angular 21 needs Node 20.19+ or 22.12+ |
-| UI shows *"Server is unreachable"* | The gateway (`:8080`) isn't running, or the UI isn't served through `npm start` (which proxies `/api`) |
-| No emails arrive | Without `MAIL_USERNAME` / `MAIL_PASSWORD` they're printed in the notification_service log instead |
+- **Simulated bank**: add money and withdraw don't call a real payment gateway (Razorpay top-ups are on the roadmap).
+- **Roadmap:** AWS deployment with GitOps (Argo CD), a redesigned UI with a demo mode, live updates, payment requests and split bills, a risk engine, an admin console, rewards, and analytics. See `docs/superpowers/specs/2026-10-17-paymesh-production-design.md`.
