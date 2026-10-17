@@ -41,6 +41,16 @@ public class User {
     @Column(nullable = false, length = 16)
     private String role = "USER";
 
+    /** Base32 TOTP secret; set at setup, active once totpEnabled. */
+    @Column(length = 64)
+    private String totpSecret;
+
+    @Column(nullable = false)
+    private boolean totpEnabled;
+
+    /** Last TOTP time step accepted: a code is valid for ~90 s and must not work twice. */
+    private Long totpLastStep;
+
     @CreationTimestamp
     private LocalDateTime createdDate;
 

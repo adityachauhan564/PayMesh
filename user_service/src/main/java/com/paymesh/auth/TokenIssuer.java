@@ -40,6 +40,7 @@ public class TokenIssuer {
                 .claim("name", user.getUserFullName())
                 .claim("roles", List.of(auth.isAdmin(user.getUserId()) ? "ADMIN" : user.getRole()))
                 .claim("amr", amr)
+                .claim("mfa", user.isTotpEnabled()) // tells services step-up applies to this user
                 .id(UUID.randomUUID().toString())
                 .issuedAt(now)
                 .expiresAt(now.plus(auth.accessTtl()))
