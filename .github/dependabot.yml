@@ -22,3 +22,8 @@ updates:
     directories: [/, /wallet-ui]
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
+    ignore:
+      # The JDK is part of these tags (3.9-eclipse-temurin-21, 21-jre) and stays on the project's Java 21;
+      # the tags float, so patch releases still arrive on every rebuild.
+      - dependency-name: maven
+      - dependency-name: eclipse-temurin
