@@ -132,4 +132,65 @@ class LoginLockoutIntegrationTest {
             throw new IllegalStateException(e);
         }
     }
+
+    // --- unlock link ---
+
+    private void lockAccount() {
+        login("wrong-1");
+        login("wrong-2");
+        assertThat(login("wrong-3").statusCode()).isEqualTo(429);
+    }
+
+    /** The link in the most recent lockout email this user was sent (via the outbox relay). */
+    @SuppressWarnings("unchecked")
+    private String latestUnlockLink() {
+        org.mockito.ArgumentCaptor<ProducerRecord<String, String>> sent = org.mockito.ArgumentCaptor.forClass(ProducerRecord.class);
+        verify(kafkaTemplate, timeout(5000).atLeastOnce())
+                .send(org.mockito.ArgumentMatchers.<ProducerRecord<String, String>>argThat(r -> r != null && (mobile + "@example.com").equals(r.key())));
+        verify(kafkaTemplate, atLeastOnce()).send(sent.capture());
+        String body = sent.getAllValues().stream().filter(r -> (mobile + "@example.com").equals(r.key()))
+                .reduce((first, second) -> second).orElseThrow().value();
+        java.util.regex.Matcher link = java.util.regex.Pattern.compile("(http://localhost:4200/api/auth/unlock\\?token=[A-Za-z0-9_-]+)").matcher(body);
+        assertThat(link.find()).as("lockout email contains an unlock link: %s", body).isTrue();
+        return link.group(1);
+    }
+
+    private HttpResponse<String> open(String link) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(link.replace("http://localhost:4200", "http://localhost:" + port))).GET().build();
+            return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString()); // does not follow redirects
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @Test
+    void unlockLinkUnlocksOnce() {
+        lockAccount();
+        String link = latestUnlockLink();
+
+        HttpResponse<String> unlocked = open(link);
+
+        assertThat(unlocked.statusCode()).isEqualTo(302);
+        assertThat(unlocked.headers().firstValue("Location")).hasValue("http://localhost:4200/login?unlocked=1");
+        assertThat(login("secret123").statusCode()).isEqualTo(200);
+        assertThat(open(link).headers().firstValue("Location")).hasValue("http://localhost:4200/login?unlock=invalid");
+    }
+
+    @Test
+    void staleOrUnknownLinkDoesNothing() {
+        lockAccount();
+        String first = latestUnlockLink();
+        userRepository.findByUserMobileNo(mobile).ifPresent(u -> {
+            u.setLockedUntil(java.time.Instant.now().minusSeconds(1)); // lock expires...
+            userRepository.save(u);
+        });
+        lockAccount(); // ...and a new one replaces the first link
+        clearInvocations(kafkaTemplate);
+
+        assertThat(open(first).headers().firstValue("Location")).hasValue("http://localhost:4200/login?unlock=invalid");
+        assertThat(open("http://localhost:4200/api/auth/unlock?token=made-up").headers().firstValue("Location"))
+                .hasValue("http://localhost:4200/login?unlock=invalid");
+        assertThat(login("secret123").statusCode()).as("still locked").isEqualTo(429);
+    }
 }

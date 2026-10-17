@@ -89,6 +89,13 @@ class GatewaySecurityTest extends GatewayTestSupport {
     }
 
     @Test
+    void unlockLinkFromTheEmailIsPublic() throws InterruptedException {
+        client.get().uri("/api/auth/unlock?token=abc").exchange().expectStatus().isOk();
+
+        assertThat(USER_SERVICE.takeRequest()).isNotNull();
+    }
+
+    @Test
     void adminPathNeedsAdminRole() {
         client.get().uri("/api/admin/anything").headers(h -> h.setBearerAuth(TestTokens.withRole("USER"))).exchange()
                 .expectStatus().isForbidden();

@@ -109,6 +109,22 @@ public class UserOperationsService {
         return new AuthResponse(tokenIssuer.issueAccess(user, List.of("pwd", "otp")), UserResponse.of(user));
     }
 
+    /** The lockout email's one-time link. False if the link is unknown, used, expired or replaced by a newer lock. */
+    @Transactional
+    public boolean unlock(String token) {
+        if (token == null || token.isBlank()) {
+            return false;
+        }
+        return userRepository.findByUnlockTokenHash(com.paymesh.auth.RefreshTokens.hash(token))
+                .flatMap(u -> userRepository.findLockedByUserId(u.getUserId()))
+                .filter(u -> u.getUnlockExpiresAt() != null && u.getUnlockExpiresAt().isAfter(java.time.Instant.now()))
+                .map(u -> {
+                    u.unlock();
+                    return true;
+                })
+                .orElse(false);
+    }
+
     public User getUser(Long userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));

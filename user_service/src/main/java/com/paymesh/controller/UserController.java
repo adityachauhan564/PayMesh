@@ -42,6 +42,9 @@ public class UserController {
     @Autowired
     private AuthProperties authProperties;
 
+    @org.springframework.beans.factory.annotation.Value("${app.public-url:http://localhost:4200}")
+    private String publicUrl;
+
     @PostMapping("/auth/register")
     public ResponseEntity<AuthResponse> register(@RequestBody @Valid RegisterRequest request) {
         return withNewSession(HttpStatus.CREATED, userOperationsService.register(request));
@@ -88,6 +91,13 @@ public class UserController {
     private String cookie(String value, Duration maxAge) {
         return ResponseCookie.from(REFRESH_COOKIE, value).httpOnly(true).secure(authProperties.cookieSecure())
                 .sameSite("Strict").path("/api/auth").maxAge(maxAge).build().toString();
+    }
+
+    /** From the lockout email: unlocks the account and sends the browser to the login page. */
+    @GetMapping("/auth/unlock")
+    public ResponseEntity<Void> unlock(@RequestParam(required = false) String token) {
+        String result = userOperationsService.unlock(token) ? "unlocked=1" : "unlock=invalid";
+        return ResponseEntity.status(HttpStatus.FOUND).header(HttpHeaders.LOCATION, publicUrl + "/login?" + result).build();
     }
 
     @PostMapping("/users/me/step-up")
