@@ -1,5 +1,8 @@
 package com.paymesh.controller;
 
+import com.paymesh.auth.AuthConfig;
+import com.paymesh.auth.JwtKeys;
+import com.paymesh.auth.TokenIssuer;
 import com.paymesh.constants.TopicConstants;
 import com.paymesh.dto.SendMailNotification;
 import com.paymesh.model.User;
@@ -41,7 +44,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "jwt.secret=user-service-test-secret-at-least-32-bytes",
         "login.lockout.max-failed-attempts=3",
         "login.lockout.duration=15m"})
-@Import({SecurityConfig.class, UserOperationsService.class, LoginAttemptService.class, LockoutNotifier.class})
+@Import({SecurityConfig.class, UserOperationsService.class, LoginAttemptService.class, LockoutNotifier.class,
+        JwtKeys.class, TokenIssuer.class, AuthConfig.class})
 class LoginLockoutTest {
 
     private static final String MOBILE = "9876543210";

@@ -7,18 +7,18 @@ import com.paymesh.dto.UserWalletCreationRequest;
 import com.paymesh.model.User;
 import com.paymesh.outbox.Outbox;
 import com.paymesh.repository.UserRepository;
-import com.paymesh.security.JwtProperties;
+import com.paymesh.auth.AuthProperties;
+import com.paymesh.auth.TokenIssuer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.*;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.time.Duration;
-import java.time.Instant;
+import java.util.List;
 
 @Service
 @Slf4j
@@ -34,10 +34,10 @@ public class UserOperationsService {
     private PasswordEncoder passwordEncoder;
 
     @Autowired
-    private JwtEncoder jwtEncoder;
+    private TokenIssuer tokenIssuer;
 
     @Autowired
-    private JwtProperties jwtProperties;
+    private AuthProperties authProperties;
 
     @Autowired
     private LoginAttemptService loginAttemptService;
@@ -61,6 +61,9 @@ public class UserOperationsService {
         user.setUserAddress(request.address());
         user.setUserPan(request.pan());
         user.setPasswordHash(passwordEncoder.encode(request.password()));
+        if (authProperties.isAdmin(request.emailId())) {
+            user.setRole("ADMIN");
+        }
         User savedUser = userRepository.save(user);
         log.info("User account is created for UserId: {}", savedUser.getUserId());
 
@@ -119,15 +122,15 @@ public class UserOperationsService {
     }
 
     private String issueToken(User user) {
-        Instant now = Instant.now();
-        JwtClaimsSet claims = JwtClaimsSet.builder()
-                .issuer(jwtProperties.issuer())
-                .subject(user.getUserId().toString())
-                .claim("name", user.getUserFullName())
-                .issuedAt(now)
-                .expiresAt(now.plus(Duration.ofHours(24)))
-                .build();
-        return jwtEncoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims)).getTokenValue();
+        return tokenIssuer.issueAccess(user, List.of("pwd"));
+    }
+
+    /** ADMIN_EMAILS also applies to accounts that existed before the setting did. */
+    @EventListener(ApplicationReadyEvent.class)
+    @Transactional
+    public void promoteAdmins() {
+        authProperties.adminEmails().stream().map(String::trim).filter(e -> !e.isEmpty())
+                .forEach(email -> userRepository.findByUserEmailId(email).ifPresent(u -> u.setRole("ADMIN")));
     }
 
     private static ResponseStatusException invalidCredentials() {

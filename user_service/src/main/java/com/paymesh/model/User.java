@@ -37,6 +37,10 @@ public class User {
     @Column(nullable = false)
     private String passwordHash;
 
+    /** USER or ADMIN; becomes the token's roles claim. */
+    @Column(nullable = false, length = 16)
+    private String role = "USER";
+
     @CreationTimestamp
     private LocalDateTime createdDate;
 

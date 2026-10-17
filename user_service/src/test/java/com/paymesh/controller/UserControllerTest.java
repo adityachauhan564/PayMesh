@@ -1,5 +1,8 @@
 package com.paymesh.controller;
 
+import com.paymesh.auth.AuthConfig;
+import com.paymesh.auth.JwtKeys;
+import com.paymesh.auth.TokenIssuer;
 import com.paymesh.constants.TopicConstants;
 import com.paymesh.dto.UserWalletCreationRequest;
 import com.paymesh.model.User;
@@ -16,7 +19,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -37,7 +40,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(value = UserController.class, properties = "jwt.secret=user-service-test-secret-at-least-32-bytes")
-@Import({SecurityConfig.class, UserOperationsService.class, LoginAttemptService.class, LockoutNotifier.class})
+@Import({SecurityConfig.class, UserOperationsService.class, LoginAttemptService.class, LockoutNotifier.class,
+        JwtKeys.class, TokenIssuer.class, AuthConfig.class})
 class UserControllerTest {
 
     @Autowired
@@ -49,7 +53,7 @@ class UserControllerTest {
     @Autowired
     private JwtDecoder jwtDecoder;
     @Autowired
-    private JwtEncoder jwtEncoder;
+    private JwtKeys jwtKeys;
 
     @MockitoBean
     private UserRepository userRepository;
@@ -94,7 +98,8 @@ class UserControllerTest {
     @Test
     void tokenWithoutIssuerIsRejected() throws Exception {
         JwtClaimsSet claims = JwtClaimsSet.builder().subject("7").issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(600)).build();
-        String legacyToken = jwtEncoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims)).getTokenValue();
+        JwtEncoder ourKeyNoIssuer = new NimbusJwtEncoder(new com.nimbusds.jose.jwk.source.ImmutableJWKSet<>(new com.nimbusds.jose.jwk.JWKSet(jwtKeys.signingKey())));
+        String legacyToken = ourKeyNoIssuer.encode(JwtEncoderParameters.from(JwsHeader.with(SignatureAlgorithm.RS256).build(), claims)).getTokenValue();
 
         mockMvc.perform(get("/api/users/me").header("Authorization", "Bearer " + legacyToken))
                 .andExpect(status().isUnauthorized());
