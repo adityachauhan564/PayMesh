@@ -1,0 +1,44 @@
+{{- $ctx := dict "root" $ "name" "redis" }}
+# Login rate-limit buckets and notification eventId claims. Losing them is harmless, so no volume (as in compose).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "paymesh.selector" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "paymesh.labels" $ctx | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+      containers:
+        - name: redis
+          image: {{ .Values.redis.image }}
+          args: ["--save", "", "--appendonly", "no"]
+          ports:
+            - { name: redis, containerPort: 6379 }
+          {{- include "paymesh.containerSecurity" . | nindent 10 }}
+          resources: {{- toYaml .Values.redis.resources | nindent 12 }}
+          readinessProbe:
+            tcpSocket: { port: redis }
+            periodSeconds: 10
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - { name: data, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+spec:
+  selector: {{- include "paymesh.selector" $ctx | nindent 4 }}
+  ports:
+    - { name: redis, port: 6379, targetPort: redis }

@@ -1,0 +1,26 @@
+{{- $ctx := dict "root" $ "name" "wallet-ui" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wallet-ui-nginx
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+data:
+  # Same as wallet-ui/nginx.conf, except the upstream: a Service's ClusterIP never changes, so no resolver is needed
+  # (compose's version re-resolves through Docker's DNS at 127.0.0.11, which doesn't exist here)
+  default.conf: |
+    server {
+        listen 8080;
+        root /usr/share/nginx/html;
+
+        location /api/ {
+            proxy_pass http://api-gateway:8080;
+            proxy_set_header Host $host;
+            # Traefik already set the client address; this appends Traefik's (the gateway trusts 2 hops)
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+        }
+
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+    }

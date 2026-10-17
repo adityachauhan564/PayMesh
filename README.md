@@ -403,7 +403,7 @@ The outbox is what normally breaks a trace: the event is written in the request'
 
 Plus HTTP, JVM, and Kafka client metrics (consumer lag included). Tags stay low-cardinality: never user ids, transaction ids or amounts.
 
-**Provisioned as code** (`deploy/observability`): two dashboards (*Payments*; *Messaging & ledger*) and three alert rules: outbox backlog above 100 for 5 minutes, any dead letter waiting, any ledger mismatch.
+**Provisioned as code** (`deploy/helm/paymesh/files/observability`): two dashboards (*Payments*; *Messaging & ledger*) and three alert rules: outbox backlog above 100 for 5 minutes, any dead letter waiting, any ledger mismatch.
 
 **Emails and mobile numbers are masked before storage.** The collector's `transform/scrub` step masks email addresses and Indian mobile numbers (with or without `+91`/`0`) in every log line, log and span attribute, span name and span event (exception messages) before anything is written, and notification_service logs a mail it isn't sending with a masked recipient and no body (the full text only at DEBUG). Scheduled pollers and health probes aren't traced, so they don't bury real requests.
 
@@ -499,7 +499,7 @@ erDiagram
     WALLET ||..|| LEDGER_ACCOUNT : "balance = credits - debits"
 ```
 
-Schemas and users are created once, with the MySQL volume, by `deploy/mysql/init/01-service-schemas.sh`. Each service's tables come from Flyway migrations in `src/main/resources/db/migration`, and Hibernate only checks them (`ddl-auto=validate`), so a mismatch stops the service at startup instead of silently altering tables.
+Schemas and users are created once, with the MySQL volume, by `deploy/helm/paymesh/files/mysql-init/01-service-schemas.sh`. Each service's tables come from Flyway migrations in `src/main/resources/db/migration`, and Hibernate only checks them (`ddl-auto=validate`), so a mismatch stops the service at startup instead of silently altering tables.
 
 **Schema changes:** add `V<n>__<what_changed>.sql` next to the service's existing migrations. Never edit a migration that has already run; Flyway checksums it. Enum columns are MySQL `enum(...)`, so a new enum constant needs an `ALTER TABLE ... MODIFY` migration. Once a service runs more than one replica, make changes **expand then contract**: a migration must keep working for the previous version still running during a rollout (add a column as nullable or with a default, backfill, and tighten it in a later release).
 
@@ -724,7 +724,7 @@ docker compose up -d mysql kafka redis    # MySQL :3306, Kafka :9092, Redis :637
 
 The `local` profile connects as `user_svc` / `wallet_svc` / `txn_svc` to `user_db` / `wallet_db` / `txn_db`, which compose's MySQL creates on its first start.
 
-> Already have MySQL on 3306? Start only the rest (`docker compose up -d kafka redis`), run `deploy/mysql/init/01-service-schemas.sh`'s SQL against yours (or create the three schemas and users yourself), and point the services at it with `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`.
+> Already have MySQL on 3306? Start only the rest (`docker compose up -d kafka redis`), run `deploy/helm/paymesh/files/mysql-init/01-service-schemas.sh`'s SQL against yours (or create the three schemas and users yourself), and point the services at it with `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`.
 
 #### 2. Build and start the backend
 
@@ -839,7 +839,8 @@ paymesh/
 │   └── src/app/
 │       ├── api.ts               HTTP client, JWT interceptor, auth guard, types
 │       └── pages/               auth · dashboard · pay · history · profile · txn-list
-├── deploy/mysql/init/           creates one schema + user per service on a new MySQL volume
+├── deploy/helm/paymesh/         Helm chart (Kubernetes); files/ holds the MySQL init script and Grafana config
+├── scripts/k3d-up.sh            runs the whole stack on a local k3d cluster
 ├── scripts/build-images.sh      builds compose images one at a time (non-ASCII path workaround)
 ├── .env.example                 secrets template for compose (copy to .env)
 ├── Dockerfile                   one image per Spring Boot service (--build-arg SERVICE=<module>)

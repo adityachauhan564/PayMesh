@@ -23,14 +23,14 @@ services:
     image: mysql:8.4
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set it in .env (copy .env.example)}
-      # Read by deploy/mysql/init/01-service-schemas.sh: one schema and user per service, created with the volume
+      # Read by deploy/helm/paymesh/files/mysql-init/01-service-schemas.sh: one schema and user per service, created with the volume
       USER_DB_PASSWORD: ${USER_DB_PASSWORD:?set it in .env (copy .env.example)}
       WALLET_DB_PASSWORD: ${WALLET_DB_PASSWORD:?set it in .env (copy .env.example)}
       TXN_DB_PASSWORD: ${TXN_DB_PASSWORD:?set it in .env (copy .env.example)}
     ports: ["127.0.0.1:3306:3306"]
     volumes:
       - mysql-data:/var/lib/mysql
-      - ./deploy/mysql/init:/docker-entrypoint-initdb.d:ro
+      - ./deploy/helm/paymesh/files/mysql-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       # TCP, not the socket: during first-run init MySQL serves the socket only, so this waits for the real server
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
@@ -68,10 +68,10 @@ services:
     image: grafana/otel-lgtm:0.35.0
     ports: ["127.0.0.1:3000:3000"]
     volumes:
-      - ./deploy/observability/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro
-      - ./deploy/observability/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/paymesh.yaml:ro
-      - ./deploy/observability/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards/paymesh:ro
-      - ./deploy/observability/alerts.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/paymesh.yaml:ro
+      - ./deploy/helm/paymesh/files/observability/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro
+      - ./deploy/helm/paymesh/files/observability/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/paymesh.yaml:ro
+      - ./deploy/helm/paymesh/files/observability/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards/paymesh:ro
+      - ./deploy/helm/paymesh/files/observability/alerts.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/paymesh.yaml:ro
 
   # Login rate-limit buckets (api_gateway) and notification eventId claims. Losing them is harmless, so no volume.
   redis:

@@ -1,0 +1,110 @@
+{{- /* One Deployment + Service per Spring service in .Values.services */}}
+{{- range $name, $svc := .Values.services }}
+{{- $ctx := dict "root" $ "name" $name }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+spec:
+  {{- if not $svc.hpa }}
+  replicas: 1
+  {{- end }}
+  strategy:
+    type: {{ $svc.strategy | default "RollingUpdate" }}
+  selector:
+    matchLabels: {{- include "paymesh.selector" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "paymesh.labels" $ctx | nindent 8 }}
+        # Read by the NetworkPolicies: an app pod, and which data stores it may reach
+        paymesh.io/app: "true"
+        {{- range $svc.data }}
+        paymesh.io/uses-{{ . }}: "true"
+        {{- end }}
+    spec:
+      # Otherwise Kubernetes injects REDIS_PORT=tcp://... and friends, which Spring would read as settings
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+      containers:
+        - name: {{ $name }}
+          image: "{{ $svc.image }}:{{ $.Values.image.tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: {{ $svc.port }} }
+          env:
+            - { name: JAVA_TOOL_OPTIONS, value: {{ $.Values.jvm.options | quote }} }
+            - { name: KAFKA_SERVERS, value: "paymesh-kafka-bootstrap:9092" }
+            - { name: JWT_JWKS_URI, value: "http://user-service:8081/.well-known/jwks.json" }
+            - { name: OTLP_ENABLED, value: "true" }
+            - { name: OTLP_ENDPOINT, value: "http://lgtm:4318" }
+            - { name: APP_PUBLIC_URL, value: {{ $.Values.ingress.publicUrl | quote }} }
+            {{- range $key, $value := $svc.env }}
+            - { name: {{ $key }}, value: {{ $value | quote }} }
+            {{- end }}
+            {{- range $key, $secretKey := $svc.secretEnv }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef: { name: {{ $.Values.secretName }}, key: {{ $secretKey }}, optional: true }
+            {{- end }}
+          {{- include "paymesh.containerSecurity" . | nindent 10 }}
+          resources: {{- toYaml $.Values.jvm.resources | nindent 12 }}
+          # Until MySQL and Kafka are up a service exits and is restarted (there is no depends_on); that is expected.
+          # Startup covers Flyway and a cold JVM on a busy node; after that, liveness restarts a hung JVM and
+          # readiness takes the pod out of its Service while it can't serve
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            timeoutSeconds: 3
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: http }
+            timeoutSeconds: 3
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: http }
+            timeoutSeconds: 3
+            periodSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+spec:
+  selector: {{- include "paymesh.selector" $ctx | nindent 4 }}
+  ports:
+    - { name: http, port: {{ $svc.port }}, targetPort: http }
+{{- if $svc.hpa }}
+---
+# Scales on CPU (metrics-server ships with k3s); demo it with a k6 run against /api/transactions
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $name }} }
+  minReplicas: {{ $svc.hpa.minReplicas }}
+  maxReplicas: {{ $svc.hpa.maxReplicas }}
+  # A JVM burns CPU for a minute or two after it turns ready (JIT warm-up); without a window that alone scales it out
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 180
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: {{ $svc.hpa.cpu }} }
+{{- end }}
+{{- end }}
