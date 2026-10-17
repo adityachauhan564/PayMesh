@@ -76,6 +76,7 @@ flowchart TB
     ts <-.-> kafka
     kafka -.-> ns["notification_service · :8082"]
     ns --> smtp[["SMTP server"]]
+    ns <-- "eventId claims (no duplicate emails)" --> redis
 ```
 
 Solid arrows are synchronous HTTP or database calls; dotted arrows are asynchronous Kafka events. Which events flow
@@ -111,8 +112,8 @@ flowchart LR
 | **`user_service`** | 8081 | Register and login (issues JWT), profile CRUD, receiver lookup, account lockout | `wallet_user` | user created / updated / deleted, lockout email | n/a |
 | **`wallet_service`** | 8091 | Wallets, balances, daily limits; **applies every payment atomically** | `wallet`, `wallet_processed_transaction` | payment result, welcome and payment emails | user events, payment requests |
 | **`transaction_service`** | 8086 | Create payments, history, details; tracks status | `wallet_transactions` | payment request | payment result |
-| **`notification_service`** | 8082 | Sends emails (logs them if SMTP isn't configured) | none | n/a | emails |
-| **`paymesh-common`** | n/a | Shared code: event DTOs, topics, JWT validation, error handling, log correlation, **transactional outbox**, Kafka defaults | `outbox_event` (each service's own rows) | n/a | n/a |
+| **`notification_service`** | 8082 | Sends emails (logs them if SMTP isn't configured), once per event | none (uses Redis for `eventId` claims) | n/a | emails |
+| **`paymesh-common`** | n/a | Shared code: event DTOs, topics, JWT validation, error handling, log correlation, **transactional outbox**, Kafka retries and dead letters | `outbox_event`, `dead_letter` (in each service's schema) | n/a | n/a |
 | **`wallet-ui`** | 4200 | Angular app: login and register, dashboard, pay, history, profile | n/a | n/a | n/a |
 
 All services share **one MySQL database** for simplicity, but each touches only its own tables and none uses another's, so they can be split into separate databases without code changes.
@@ -320,10 +321,26 @@ sequenceDiagram
 | Create wallet | Skips if the wallet already exists (no second welcome email) |
 | Update or delete wallet owner | Setting the same values again changes nothing |
 | Apply payment | `wallet_processed_transaction` records each `transactionId` |
-| Update payment status | Setting the same status again changes nothing |
-| Send email | **May send twice** in the rare crash case above |
+| Update payment status | Only a `PENDING` payment takes a result; a late or repeated result for a final payment is ignored |
+| Send email | The event's `eventId` is claimed in Redis (`notification:sent:<eventId>`, 7 days) before sending; a claimed id is skipped |
 
 `Outbox.publish(...)` runs only inside an existing transaction (`Propagation.MANDATORY`). Calling it anywhere else is a programming error and fails immediately.
+
+**Every event carries two headers**, set by the relay from the outbox row:
+
+| Header | Purpose |
+|---|---|
+| `eventId` | Unique per event (UUID); consumers without a natural business key dedupe on it |
+| `correlationId` | The request's `X-Correlation-Id`; consumers put it back into the log context, and the events they write carry it on, so one payment can be followed through every service's logs |
+
+### When a message can't be handled
+
+1. **Retry:** every listener gets 3 attempts, 0.5 s then 1 s apart (one `DefaultErrorHandler` in `paymesh-common`). Unparseable JSON can never succeed, so it skips the retries.
+2. **Park:** the message goes to `<topic>.DLT` with the exception in its headers, and the partition moves on: one bad message never blocks the ones behind it.
+3. **Keep:** wallet_service and transaction_service consume their own DLTs into a `dead_letter` table (topic, key, payload, exception, status `NEW` / `REPLAYED` / `DISCARDED`).
+4. **Replay or discard:** `DeadLetterStore.replay(id)` puts the payload back on its original topic **through the outbox**, in the same transaction as the status change, so a replay is never lost or doubled. (Admin endpoints for this arrive with the admin console.)
+
+notification_service has no database, so its failures stay on `SEND_NOTIFICATION.DLT`; replay them with the Kafka CLI.
 
 ---
 
@@ -412,7 +429,7 @@ Schemas and users are created once, with the MySQL volume, by `deploy/mysql/init
 | `COMPLETED_TRANSACTION_TOPIC` | wallet_service | transaction_service | transactionId | `{transactionId, paymentStatus, reason, fromName, toName}` |
 | `SEND_NOTIFICATION` | user_service, wallet_service | notification_service | recipient email | `{receiverMailId, subject, message}` |
 
-Keys keep ordering per user and per transaction. Payload classes live in `paymesh-common/.../dto`.
+Keys keep ordering per user and per transaction. Payload classes live in `paymesh-common/.../dto`. Every topic has a `<topic>.DLT` twin for messages that failed all retries, and every message carries `eventId` and `correlationId` headers (see [Reliability](#reliability-the-transactional-outbox)).
 
 ---
 
@@ -718,11 +735,11 @@ paymesh/
 
 ## Known limitations and roadmap
 
-- **Emails are at-least-once.** A crash at exactly the wrong moment can send one twice.
+- **Emails are at-most-once.** Duplicates are suppressed by `eventId`; a crash between claiming the id and sending can lose one email (by design: a duplicate payment email is worse than a missing one). If Redis is down, mail is sent without the duplicate check.
+- **Notification dead letters** stay on `SEND_NOTIFICATION.DLT` (notification_service has no database); replay them with the Kafka CLI.
 - **Tokens can't be revoked** before their 24 h expiry. Next step: short access tokens plus refresh tokens.
 - **Lockout can be abused**: someone who knows a mobile number can keep that account locked, 15 minutes at a time. Mitigations: CAPTCHA after failures, or unlock by email.
 - **Users behind one shared IP** (office, mobile carrier NAT) share a login rate-limit bucket.
-- **Correlation IDs stop at Kafka**; they aren't yet carried in message headers.
 - **The UI keeps the token in `localStorage`**, which an XSS bug could read. An HttpOnly cookie would be safer.
 - **Simulated bank**: add money and withdraw don't call a real payment gateway.
 
