@@ -1,6 +1,8 @@
 package com.paymesh.controller;
 
+import com.paymesh.auth.AccessTokenDenylist;
 import com.paymesh.auth.AuthConfig;
+import com.paymesh.auth.RefreshTokens;
 import com.paymesh.auth.JwtKeys;
 import com.paymesh.auth.TokenIssuer;
 import com.paymesh.constants.TopicConstants;
@@ -57,6 +59,10 @@ class UserControllerTest {
 
     @MockitoBean
     private UserRepository userRepository;
+    @MockitoBean
+    private RefreshTokens refreshTokens; // session flow: RefreshFlowIntegrationTest
+    @MockitoBean
+    private AccessTokenDenylist accessTokenDenylist;
     @MockitoBean
     private Outbox outbox;
     @MockitoBean

@@ -76,6 +76,12 @@ public class UserOperationsService {
         return new AuthResponse(issueToken(user), UserResponse.of(user));
     }
 
+    /** A fresh access token for an existing session (refresh). */
+    public AuthResponse sessionFor(long userId) {
+        User user = getUser(userId);
+        return new AuthResponse(issueToken(user), UserResponse.of(user));
+    }
+
     public User getUser(Long userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));

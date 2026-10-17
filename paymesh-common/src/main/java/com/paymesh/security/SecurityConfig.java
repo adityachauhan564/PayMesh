@@ -12,6 +12,8 @@ import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
@@ -42,6 +44,15 @@ public class SecurityConfig {
         return converter;
     }
 
+    /**
+     * /api/auth/** is public: an expired token sent along (e.g. on logout) must not turn the request into a 401.
+     * The logout endpoint reads the header itself, leniently.
+     */
+    private static BearerTokenResolver authEndpointsIgnoreBearer() {
+        DefaultBearerTokenResolver standard = new DefaultBearerTokenResolver();
+        return request -> request.getRequestURI().startsWith("/api/auth/") ? null : standard.resolve(request);
+    }
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
@@ -51,7 +62,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**", "/.well-known/jwks.json", "/error").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
-                .oauth2ResourceServer(o -> o.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
+                .oauth2ResourceServer(o -> o
+                        .bearerTokenResolver(authEndpointsIgnoreBearer())
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
                 .build();
     }
 }
