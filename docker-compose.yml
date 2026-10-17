@@ -59,7 +59,7 @@ services:
       retries: 12
       start_period: 15s
 
-  # Login rate-limit buckets for api_gateway. Losing them is harmless, so no volume.
+  # Login rate-limit buckets (api_gateway) and notification eventId claims. Losing them is harmless, so no volume.
   redis:
     image: redis:7.4-alpine
     ports: ["127.0.0.1:6379:6379"]
@@ -96,8 +96,10 @@ services:
     build: { context: ., args: { SERVICE: notification_service } }
     depends_on:
       kafka: { condition: service_healthy }
+      redis: { condition: service_started }
     environment:
       KAFKA_SERVERS: kafka:19092
+      REDIS_HOST: redis
       JWT_SECRET: ${JWT_SECRET:?set it in .env (copy .env.example)}
       # Unset = mails are logged instead of sent (see notification_service)
       MAIL_USERNAME: ${MAIL_USERNAME:-}
