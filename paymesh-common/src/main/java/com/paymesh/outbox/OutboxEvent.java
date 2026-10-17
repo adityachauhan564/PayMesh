@@ -10,7 +10,8 @@ import java.time.Instant;
 
 /**
  * A Kafka message waiting to be published. Written in the same transaction as the data change it describes,
- * deleted once Kafka has acknowledged it. All services share one database, so each row records its producer.
+ * deleted once Kafka has acknowledged it. Each service has its own schema; the producer column is kept so a relay
+ * never picks up another service's rows if schemas are ever shared again.
  */
 @Entity
 @Getter

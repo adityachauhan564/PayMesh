@@ -329,7 +329,7 @@ sequenceDiagram
 
 ## Data model
 
-The services share one database but **no foreign keys cross service boundaries**. The dotted lines are logical references by ID.
+Each service owns its schema on one MySQL server (`user_db`, `wallet_db`, `txn_db`), with its own MySQL user and its own Flyway migrations. **No foreign keys or queries cross service boundaries**: a service user can't even read another schema. The dotted lines are logical references by ID.
 
 ```mermaid
 erDiagram
@@ -395,7 +395,9 @@ erDiagram
     WALLET_TRANSACTIONS ||..o| WALLET_PROCESSED_TRANSACTION : "applied as"
 ```
 
-Tables are created and updated by Hibernate (`ddl-auto=update`), and the database itself is created on first start (`createDatabaseIfNotExist=true`).
+Schemas and users are created once, with the MySQL volume, by `deploy/mysql/init/01-service-schemas.sh`. Each service's tables come from Flyway migrations in `src/main/resources/db/migration`, and Hibernate only checks them (`ddl-auto=validate`), so a mismatch stops the service at startup instead of silently altering tables.
+
+**Schema changes:** add `V<n>__<what_changed>.sql` next to the service's existing migrations. Never edit a migration that has already run; Flyway checksums it. Enum columns are MySQL `enum(...)`, so a new enum constant needs an `ALTER TABLE ... MODIFY` migration.
 
 ---
 
@@ -561,8 +563,8 @@ and Redis `:6379` are, on localhost only.
 | `api-gateway`, `user-service`, `wallet-service`, `transaction-service`, `notification-service` | root `Dockerfile` with `SERVICE=<module>` | JRE 21, non-root |
 | `mysql`, `kafka`, `redis` | upstream images | health-checked; services wait for MySQL and Kafka |
 
-Settings come from your shell or the `.env` file next to `docker-compose.yml` (start from `.env.example`): `MYSQL_ROOT_PASSWORD`, `DB_PASSWORD`
-and `JWT_SECRET` are **required**, `DB_USERNAME` defaults to `root`, and `MAIL_USERNAME` / `MAIL_PASSWORD` (unset = mails are logged by `notification-service`).
+Settings come from your shell or the `.env` file next to `docker-compose.yml` (start from `.env.example`): `MYSQL_ROOT_PASSWORD`,
+`USER_DB_PASSWORD`, `WALLET_DB_PASSWORD`, `TXN_DB_PASSWORD` and `JWT_SECRET` are **required**, and `MAIL_USERNAME` / `MAIL_PASSWORD` (unset = mails are logged by `notification-service`).
 
 ```bash
 docker compose logs -f notification-service    # the emails
@@ -578,7 +580,9 @@ cp .env.example .env                    # its placeholder DB password matches th
 docker compose up -d mysql kafka redis    # MySQL :3306, Kafka :9092, Redis :6379
 ```
 
-> Already have MySQL on 3306? Start only the rest (`docker compose up -d kafka redis`) and point the services at yours with `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`.
+The `local` profile connects as `user_svc` / `wallet_svc` / `txn_svc` to `user_db` / `wallet_db` / `txn_db`, which compose's MySQL creates on its first start.
+
+> Already have MySQL on 3306? Start only the rest (`docker compose up -d kafka redis`), run `deploy/mysql/init/01-service-schemas.sh`'s SQL against yours (or create the three schemas and users yourself), and point the services at it with `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`.
 
 #### 2. Build and start the backend
 
@@ -624,8 +628,9 @@ All settings come from environment variables with local-friendly defaults.
 |---|---|---|---|
 | `JWT_SECRET` | **required** (`local` profile has a dev value) | all | HS256 signing key, ≥ 32 bytes, identical everywhere |
 | `JWT_ISSUER` | `paymesh` | all | Expected `iss` claim |
-| `DB_URL` | `jdbc:mysql://localhost:3306/paymesh?createDatabaseIfNotExist=true` | user, wallet, transaction | Database |
-| `DB_USERNAME` / `DB_PASSWORD` | **required** (`local` profile has dev values) | user, wallet, transaction | Database credentials |
+| `DB_URL` | `jdbc:mysql://localhost:3306/user_db` (`wallet_db`, `txn_db`) | user, wallet, transaction | The service's own schema |
+| `DB_USERNAME` / `DB_PASSWORD` | **required** (`local` profile: `user_svc` / `wallet_svc` / `txn_svc`, password `change-me-local-only`) | user, wallet, transaction | The service's own MySQL user |
+| `USER_DB_PASSWORD` / `WALLET_DB_PASSWORD` / `TXN_DB_PASSWORD` | **required** (compose only) | mysql init, services | Passwords for the three service users |
 | `KAFKA_SERVERS` | `localhost:9092` | all services | Kafka bootstrap servers |
 | `USER_SERVICE_URL` / `WALLET_SERVICE_URL` / `TRANSACTION_SERVICE_URL` | `http://localhost:8081` / `:8091` / `:8086` | gateway | Route targets |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / none | gateway | Rate-limit store |
@@ -674,14 +679,17 @@ paymesh/
 │       ├── outbox/              Outbox, OutboxRelay, OutboxEvent (transactional outbox)
 │       ├── kafka/               producer defaults (5 s max block, payload-free logging)
 │       └── logging/             correlation ID → log context
-├── user_service/                accounts, JWT issuing, lockout
-├── wallet_service/              wallets, balances, applying payments
-├── transaction_service/         payments, history
+├── user_service/                accounts, JWT issuing, lockout (Flyway: src/main/resources/db/migration)
+├── wallet_service/              wallets, balances, applying payments (Flyway as above)
+├── transaction_service/         payments, history (Flyway as above)
 ├── notification_service/        emails
 ├── wallet-ui/                   Angular 21 app
 │   └── src/app/
 │       ├── api.ts               HTTP client, JWT interceptor, auth guard, types
 │       └── pages/               auth · dashboard · pay · history · profile · txn-list
+├── deploy/mysql/init/           creates one schema + user per service on a new MySQL volume
+├── scripts/build-images.sh      builds compose images one at a time (non-ASCII path workaround)
+├── .env.example                 secrets template for compose (copy to .env)
 ├── Dockerfile                   one image per Spring Boot service (--build-arg SERVICE=<module>)
 ├── docker-compose.yml           whole stack, or infra only for IDE runs
 └── Requirements                 original project brief
@@ -698,6 +706,7 @@ paymesh/
 | **Transactional outbox** | DB-then-Kafka loses events on crashes and outages; the outbox makes events part of the commit |
 | **JWT validated at gateway *and* services** | Defence in depth: bypassing the gateway grants nothing; services never trust headers |
 | **HS256 shared secret** | Simple for one issuer inside one trust boundary; easy to move to RS256/JWKS if third parties ever verify tokens |
+| **Schema per service, Flyway migrations, `ddl-auto=validate`** | Services can't couple through tables; every schema change is reviewed SQL with a history; a drifted schema fails fast at startup |
 | **`BigDecimal` for money** | `double` can't represent ₹0.10 exactly |
 | **ProblemDetail (RFC 7807) everywhere** | One error shape for the UI, from the gateway and every service |
 | **`spring.jpa.open-in-view=false` in user_service** | With it on, the row-locked read returned a stale cached copy and concurrent failed logins overwrote each other's count |
@@ -716,7 +725,6 @@ paymesh/
 - **Correlation IDs stop at Kafka**; they aren't yet carried in message headers.
 - **The UI keeps the token in `localStorage`**, which an XSS bug could read. An HttpOnly cookie would be safer.
 - **Simulated bank**: add money and withdraw don't call a real payment gateway.
-- **Shared database**: ready to split into one database per service, but not split yet.
 
 ---
 
@@ -725,7 +733,8 @@ paymesh/
 | Symptom | Cause and fix |
 |---|---|
 | `jwt.secret (env JWT_SECRET) must be set and at least 32 bytes` at startup | Intended. Run with `--spring.profiles.active=local`, or set `JWT_SECRET` |
-| `Access denied for user 'root'@'localhost'` | Your MySQL has a different password: set `DB_PASSWORD` (and `DB_URL` if not on 3306) |
+| `Access denied for user 'user_svc'` (or `wallet_svc`, `txn_svc`) or `Unknown database 'user_db'` after upgrading | Your `mysql-data` volume predates the per-service schemas, and init scripts only run on a new volume. `docker compose down -v` (this **wipes local data**), then start again |
+| `Access denied for user '...'@'localhost'` from the IDE | Your MySQL has different credentials: set `DB_USERNAME` / `DB_PASSWORD` (and `DB_URL` if not on 3306) |
 | Wallet says *"being created"* for a long time | Kafka or wallet_service isn't running. Nothing is lost: pending events sit in `outbox_event` and go out once both are up |
 | Payment stuck at *Processing* | Same as above: check Kafka and wallet_service |
 | Login returns **429** | Too many attempts from your IP, or the account is locked; wait for `Retry-After` seconds |

@@ -11,9 +11,6 @@ x-spring-service: &spring-service
     kafka: { condition: service_healthy }
 
 x-service-env: &service-env
-  DB_URL: jdbc:mysql://mysql:3306/paymesh?createDatabaseIfNotExist=true
-  DB_USERNAME: ${DB_USERNAME:-root}
-  DB_PASSWORD: ${DB_PASSWORD:?set it in .env (copy .env.example)}
   KAFKA_SERVERS: kafka:19092
   # Required: set in .env (copy .env.example); compose refuses to start without it
   JWT_SECRET: ${JWT_SECRET:?set it in .env (copy .env.example)}
@@ -23,9 +20,14 @@ services:
     image: mysql:8.4
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set it in .env (copy .env.example)}
-      MYSQL_DATABASE: paymesh
+      # Read by deploy/mysql/init/01-service-schemas.sh: one schema and user per service, created with the volume
+      USER_DB_PASSWORD: ${USER_DB_PASSWORD:?set it in .env (copy .env.example)}
+      WALLET_DB_PASSWORD: ${WALLET_DB_PASSWORD:?set it in .env (copy .env.example)}
+      TXN_DB_PASSWORD: ${TXN_DB_PASSWORD:?set it in .env (copy .env.example)}
     ports: ["127.0.0.1:3306:3306"]
-    volumes: [mysql-data:/var/lib/mysql]
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./deploy/mysql/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       # TCP, not the socket: during first-run init MySQL serves the socket only, so this waits for the real server
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
@@ -65,17 +67,29 @@ services:
   user-service:
     <<: *spring-service
     build: { context: ., args: { SERVICE: user_service } }
-    environment: *service-env
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/user_db
+      DB_USERNAME: user_svc
+      DB_PASSWORD: ${USER_DB_PASSWORD:?set it in .env (copy .env.example)}
 
   wallet-service:
     <<: *spring-service
     build: { context: ., args: { SERVICE: wallet_service } }
-    environment: *service-env
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/wallet_db
+      DB_USERNAME: wallet_svc
+      DB_PASSWORD: ${WALLET_DB_PASSWORD:?set it in .env (copy .env.example)}
 
   transaction-service:
     <<: *spring-service
     build: { context: ., args: { SERVICE: transaction_service } }
-    environment: *service-env
+    environment:
+      <<: *service-env
+      DB_URL: jdbc:mysql://mysql:3306/txn_db
+      DB_USERNAME: txn_svc
+      DB_PASSWORD: ${TXN_DB_PASSWORD:?set it in .env (copy .env.example)}
 
   notification-service:
     <<: *spring-service

@@ -11,7 +11,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Active in services that have JPA (user, wallet, transaction); notification_service has no database and skips it.
- * spring.application.name is required: it tells this service's events apart in the shared database.
+ * spring.application.name is required: it is written to, and filtered on, every outbox row (see OutboxEvent).
  */
 @Configuration
 @ConditionalOnClass(name = "jakarta.persistence.EntityManager")
