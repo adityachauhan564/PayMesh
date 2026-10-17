@@ -33,7 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(value = TransactionController.class)
-@Import({SecurityConfig.class, TransactionService.class, StepUpPolicy.class})
+@Import({SecurityConfig.class, TransactionService.class, StepUpPolicy.class, io.micrometer.core.instrument.simple.SimpleMeterRegistry.class})
 class TransactionControllerTest {
 
     @Autowired

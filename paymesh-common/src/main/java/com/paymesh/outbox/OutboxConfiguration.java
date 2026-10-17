@@ -1,5 +1,7 @@
 package com.paymesh.outbox;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.propagation.Propagator;
 import org.springframework.beans.factory.ObjectProvider;
@@ -20,6 +22,13 @@ import tools.jackson.databind.json.JsonMapper;
 @ConditionalOnClass(name = "jakarta.persistence.EntityManager")
 @EnableScheduling
 public class OutboxConfiguration {
+
+    /** Events still waiting to be published: a growing number means Kafka (or the relay) is behind. */
+    @Bean
+    Gauge outboxBacklog(MeterRegistry registry, OutboxEventRepository repository, @Value("${spring.application.name}") String producer) {
+        return Gauge.builder("paymesh.outbox.backlog", repository, r -> r.countByProducer(producer))
+                .description("Outbox events not yet published to Kafka").register(registry);
+    }
 
     @Bean
     OutboxTracing outboxTracing(ObjectProvider<Tracer> tracer, ObjectProvider<Propagator> propagator) {

@@ -65,6 +65,8 @@ class OutboxIntegrationTest {
     private OutboxEventRepository repository;
     @Autowired
     private PlatformTransactionManager transactionManager;
+    @Autowired
+    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     private TransactionTemplate transaction;
 
@@ -204,6 +206,14 @@ class OutboxIntegrationTest {
 
         assertThat(repository.findAll()).singleElement()
                 .satisfies(event -> assertThat(event.getPayload()).isEqualTo("{\"a\":1}"));
+    }
+
+    @Test
+    void backlogGaugeCountsThisServicesPendingEvents() {
+        publishInOwnTransactions("a", "b");
+        transaction.executeWithoutResult(status -> repository.save(new OutboxEvent("other-service", "orders", "x", "{}", null)));
+
+        assertThat(meterRegistry.get("paymesh.outbox.backlog").gauge().value()).isEqualTo(2.0);
     }
 
     @SuppressWarnings("unchecked")

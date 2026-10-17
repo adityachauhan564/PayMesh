@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
@@ -22,6 +24,8 @@ class TransactionStatusGuardTest {
 
     @Mock
     private TransactionRepository transactionRepository;
+    @Spy
+    private SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     @InjectMocks
     private TransactionService transactionService;
@@ -30,6 +34,8 @@ class TransactionStatusGuardTest {
         Transaction txn = new Transaction();
         txn.setTransactionId("t-1");
         txn.setStatus(status);
+        txn.setType(Transaction.Type.TRANSFER);
+        txn.setPaymentInitiationDate(java.time.LocalDateTime.now().minusSeconds(2));
         when(transactionRepository.findById("t-1")).thenReturn(Optional.of(txn));
         return txn;
     }
@@ -46,6 +52,20 @@ class TransactionStatusGuardTest {
 
         assertThat(txn.getStatus()).isEqualTo(PaymentStatus.SUCCESSFUL);
         verify(transactionRepository).save(txn);
+    }
+
+    @Test
+    void completedPaymentIsCountedOnceWithLowCardinalityTags() {
+        stored(PaymentStatus.PENDING);
+
+        transactionService.updateTransactionStatus(result(PaymentStatus.SUCCESSFUL, null));
+        transactionService.updateTransactionStatus(result(PaymentStatus.SUCCESSFUL, null)); // redelivery
+
+        var counter = meterRegistry.get("paymesh.payments.completed").counter();
+        assertThat(counter.count()).isEqualTo(1.0);
+        assertThat(counter.getId().getTags()).extracting(io.micrometer.core.instrument.Tag::getKey).containsExactlyInAnyOrder("status", "type");
+        assertThat(counter.getId().getTag("status")).isEqualTo("SUCCESSFUL");
+        assertThat(meterRegistry.get("paymesh.payments.duration").timer().count()).isEqualTo(1);
     }
 
     @Test

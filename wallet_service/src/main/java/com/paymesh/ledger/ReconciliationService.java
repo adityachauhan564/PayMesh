@@ -1,5 +1,7 @@
 package com.paymesh.ledger;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -8,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Proves the ledger: every wallet's cached balance must equal its credits minus debits, and all postings together
@@ -29,9 +32,13 @@ public class ReconciliationService {
     private static final String NET = "SELECT COALESCE(SUM(CASE direction WHEN 'DEBIT' THEN amount ELSE -amount END), 0) FROM ledger_posting";
 
     private final JdbcTemplate jdbc;
+    /** Wallets out of line with their postings (plus 1 if postings don't net to zero) at the last nightly run. */
+    private final AtomicInteger mismatches = new AtomicInteger();
 
-    public ReconciliationService(JdbcTemplate jdbc) {
+    public ReconciliationService(JdbcTemplate jdbc, MeterRegistry meterRegistry) {
         this.jdbc = jdbc;
+        Gauge.builder("paymesh.ledger.mismatches", mismatches, AtomicInteger::get)
+                .description("Ledger reconciliation problems found by the last nightly run").register(meterRegistry);
     }
 
     public ReconciliationReport reconcile() {
@@ -44,6 +51,7 @@ public class ReconciliationService {
     @SchedulerLock(name = "ledger-reconcile", lockAtMostFor = "PT10M")
     public void nightly() {
         ReconciliationReport report = reconcile();
+        mismatches.set(report.mismatches().size() + (report.netOfAllPostings().signum() == 0 ? 0 : 1));
         if (report.clean()) {
             log.info("Ledger reconciled: every wallet matches its postings");
         } else {
