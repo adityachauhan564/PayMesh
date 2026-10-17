@@ -14,7 +14,7 @@ import java.sql.SQLException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 
-/** Runs deploy/mysql/init/01-service-schemas.sh exactly as compose does, with passwords a generator might produce. */
+/** Runs deploy/helm/paymesh/files/mysql-init/01-service-schemas.sh exactly as compose and the Helm chart do, with passwords a generator might produce. */
 class ServiceSchemasInitScriptTest {
 
     private static final String USER_PW = "pa'ss\\w$rd`x";
@@ -25,7 +25,7 @@ class ServiceSchemasInitScriptTest {
             .withEnv("WALLET_DB_PASSWORD", WALLET_PW)
             .withEnv("TXN_DB_PASSWORD", "txn-pw")
             .withCopyFileToContainer(
-                    MountableFile.forHostPath(Path.of("..", "deploy", "mysql", "init", "01-service-schemas.sh")),
+                    MountableFile.forHostPath(Path.of("..", "deploy", "helm", "paymesh", "files", "mysql-init", "01-service-schemas.sh")),
                     "/docker-entrypoint-initdb.d/01-service-schemas.sh");
 
     @BeforeAll
