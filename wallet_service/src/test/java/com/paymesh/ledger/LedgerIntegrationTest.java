@@ -52,6 +52,8 @@ class LedgerIntegrationTest {
     private Ledger ledger;
     @Autowired
     private JdbcTemplate jdbc;
+    @Autowired
+    private ReconciliationService reconciliation;
 
     @BeforeEach
     void wallets() {
@@ -138,5 +140,31 @@ class LedgerIntegrationTest {
         walletOperations.applyTransaction(payment(TransactionType.ADD_MONEY, null, 66L, "70.00"));
 
         assertThat(ledger.balanceOf(66)).isEqualByComparingTo("70.00");
+    }
+
+    @Test
+    void cleanLedgerReconciles() {
+        walletOperations.applyTransaction(payment(TransactionType.ADD_MONEY, null, 1L, "300.00"));
+        walletOperations.applyTransaction(payment(TransactionType.TRANSFER, 1L, 2L, "120.00"));
+
+        ReconciliationReport report = reconciliation.reconcile();
+
+        assertThat(report.clean()).as(report.toString()).isTrue();
+        assertThat(report.netOfAllPostings()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void tamperedBalanceIsNamed() {
+        jdbc.update("UPDATE wallet SET balance = balance + 1 WHERE user_id = 3");
+        try {
+            ReconciliationReport report = reconciliation.reconcile();
+
+            assertThat(report.mismatches()).singleElement().satisfies(m -> {
+                assertThat(m.userId()).isEqualTo(3L);
+                assertThat(m.walletBalance().subtract(m.ledgerBalance())).isEqualByComparingTo("1.00");
+            });
+        } finally {
+            jdbc.update("UPDATE wallet SET balance = balance - 1 WHERE user_id = 3");
+        }
     }
 }
