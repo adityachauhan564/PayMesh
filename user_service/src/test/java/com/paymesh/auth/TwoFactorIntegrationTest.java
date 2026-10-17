@@ -278,4 +278,17 @@ class TwoFactorIntegrationTest {
                 .header("Cookie", "paymesh_refresh=" + refreshCookie).POST(HttpRequest.BodyPublishers.noBody()).build();
         assertThat(http.send(refresh, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(401);
     }
+
+    /** Setup asks for the password, so it must not become a way to guess it around the login lockout. */
+    @Test
+    void wrongPasswordsOnSetupCountTowardLockout() throws Exception {
+        Account account = register();
+        String wrong = "{\"password\":\"not-my-password\"}";
+
+        for (int i = 0; i < 4; i++) {
+            assertThat(post("/api/users/me/2fa/setup", wrong, account.token()).statusCode()).isEqualTo(403);
+        }
+        assertThat(post("/api/users/me/2fa/setup", wrong, account.token()).statusCode()).isEqualTo(429);
+        assertThat(post("/api/users/me/2fa/setup", "{\"password\":\"secret123\"}", account.token()).statusCode()).isEqualTo(429);
+    }
 }

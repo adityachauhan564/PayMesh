@@ -4,6 +4,7 @@ import com.paymesh.constants.TopicConstants;
 import com.paymesh.dto.SendMailNotification;
 import com.paymesh.model.User;
 import com.paymesh.outbox.Outbox;
+import com.paymesh.service.AccountLockedException;
 import com.paymesh.repository.UserRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -16,6 +17,8 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -30,10 +33,10 @@ public class TwoFactor {
     public record Setup(String secret, String otpauthUri) {
     }
 
-    /** A wrong code; the controller counts it toward the account lockout (outside this transaction). */
-    public static class WrongCodeException extends ResponseStatusException {
-        WrongCodeException() {
-            super(HttpStatus.BAD_REQUEST, "That code didn't match. Check the time on your phone and try again");
+    /** A wrong code or password; the controller counts it toward the account lockout (outside this transaction). */
+    public static class WrongSecretException extends ResponseStatusException {
+        WrongSecretException(HttpStatus status, String message) {
+            super(status, message);
         }
     }
 
@@ -129,7 +132,7 @@ public class TwoFactor {
 
     private void requirePassword(User user, String password) {
         if (password == null || !passwordEncoder.matches(password, user.getPasswordHash())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Password is incorrect");
+            throw new WrongSecretException(HttpStatus.FORBIDDEN, "Password is incorrect");
         }
     }
 
@@ -165,11 +168,20 @@ public class TwoFactor {
         return verify(locked(userId), code);
     }
 
+    /**
+     * The user's row, locked, refusing a locked account. Checked here under the row lock (not only before), so
+     * guesses sent in parallel are serialised against the failure counter instead of all slipping past one check.
+     */
     private User locked(long userId) {
-        return users.findLockedByUserId(userId).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        User user = users.findLockedByUserId(userId).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        Instant now = clock.instant();
+        if (user.isLockedAt(now)) {
+            throw new AccountLockedException(Duration.between(now, user.getLockedUntil()));
+        }
+        return user;
     }
 
     private static ResponseStatusException wrongCode() {
-        return new WrongCodeException();
+        return new WrongSecretException(HttpStatus.BAD_REQUEST, "That code didn't match. Check the time on your phone and try again");
     }
 }

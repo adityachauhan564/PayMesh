@@ -15,8 +15,8 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Two-factor settings for the signed-in user. Wrong codes count toward the same lockout as failed logins, and a
- * locked account can't try more, so the 6-digit code can't be brute-forced through these endpoints either.
+ * Two-factor settings for the signed-in user. Wrong codes and passwords count toward the same lockout as failed
+ * logins, and a locked account can't try more, so neither can be brute-forced through these endpoints either.
  */
 @RestController
 @RequestMapping("/api/users/me/2fa")
@@ -46,32 +46,33 @@ public class TwoFactorController {
 
     @PostMapping("/setup")
     public TwoFactor.Setup setup(@AuthenticationPrincipal Jwt jwt, @RequestBody @Valid PasswordRequest request) {
-        return twoFactor.setup(userId(jwt), request.password());
+        long userId = userId(jwt);
+        return countingWrongSecrets(userId, () -> twoFactor.setup(userId, request.password()));
     }
 
     @PostMapping("/enable")
     public RecoveryCodes enable(@AuthenticationPrincipal Jwt jwt, @RequestBody @Valid CodeRequest request) {
         long userId = userId(jwt);
-        return new RecoveryCodes(countingWrongCodes(userId, () -> twoFactor.enable(userId, request.code())));
+        return new RecoveryCodes(countingWrongSecrets(userId, () -> twoFactor.enable(userId, request.code())));
     }
 
     @PostMapping("/disable")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void disable(@AuthenticationPrincipal Jwt jwt, @RequestBody @Valid PasswordAndCodeRequest request) {
         long userId = userId(jwt);
-        countingWrongCodes(userId, () -> {
+        countingWrongSecrets(userId, () -> {
             twoFactor.disable(userId, request.password(), request.code());
             return null;
         });
     }
 
-    /** The failure is recorded after the code check's transaction has rolled back, so it sticks. */
-    private <T> T countingWrongCodes(long userId, Supplier<T> action) {
+    /** The failure is recorded after the check's transaction has rolled back, so it sticks. */
+    private <T> T countingWrongSecrets(long userId, Supplier<T> action) {
         loginAttempts.ensureNotLocked(users.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found")));
         try {
             return action.get();
-        } catch (TwoFactor.WrongCodeException e) {
+        } catch (TwoFactor.WrongSecretException e) {
             loginAttempts.recordFailure(userId); // throws 429 once this failure locks the account
             throw e;
         }

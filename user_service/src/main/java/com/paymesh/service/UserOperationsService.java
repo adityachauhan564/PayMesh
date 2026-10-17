@@ -101,7 +101,7 @@ public class UserOperationsService {
     /** Proves the second factor again (large payments ask for it): a token with amr otp and a fresh iat. */
     public AuthResponse stepUp(long userId, String code) {
         User user = getUser(userId);
-        loginAttemptService.ensureNotLocked(user); // a locked account can't keep guessing codes here either
+        loginAttemptService.ensureNotLocked(user); // fast path; verifyForUser re-checks under the row lock
         if (!twoFactor.verifyForUser(userId, code)) {
             loginAttemptService.recordFailure(userId);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That code didn't match");
