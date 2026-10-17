@@ -64,6 +64,18 @@ describe('authInterceptor', () => {
   });
 });
 
+describe('Api.createTxn', () => {
+  afterEach(() => TestBed.inject(HttpTestingController).verify());
+
+  it('sends the Idempotency-Key header', () => {
+    const { api, backend } = setup(true);
+    api.createTxn({ type: 'ADD_MONEY', amount: 100 }, 'k-1');
+    const req = backend.expectOne('/api/transactions');
+    expect(req.request.headers.get('Idempotency-Key')).toBe('k-1');
+    req.flush({});
+  });
+});
+
 describe('authGuard', () => {
   it('redirects to /login without a session', () => {
     setup(false);

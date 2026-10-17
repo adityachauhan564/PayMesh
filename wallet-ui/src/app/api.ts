@@ -100,8 +100,9 @@ export class Api {
     return firstValueFrom(this.http.put<Wallet>('/api/wallets/me/limits', { dailyLimit, dailyTransactionLimit }));
   }
 
-  createTxn(body: object) {
-    return firstValueFrom(this.http.post<Txn>('/api/transactions', body));
+  /** The key makes a retry of the same attempt safe: the server replays the first response instead of paying twice. */
+  createTxn(body: object, idempotencyKey: string) {
+    return firstValueFrom(this.http.post<Txn>('/api/transactions', body, { headers: { 'Idempotency-Key': idempotencyKey } }));
   }
 
   txn(id: string) {
