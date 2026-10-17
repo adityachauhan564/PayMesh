@@ -82,8 +82,7 @@ public class UserOperationsService {
             if (request.otp() == null || request.otp().isBlank()) {
                 throw new MfaRequiredException(); // not a failed attempt: the password was right
             }
-            if (!twoFactor.verifyForUser(user.getUserId(), request.otp())) {
-                loginAttemptService.recordFailure(user.getUserId()); // wrong codes count toward the lockout
+            if (!twoFactor.verifyForUser(user.getUserId(), request.otp())) { // counts the failure (429 once locked)
                 throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid code");
             }
             amr = List.of("pwd", "otp");
@@ -102,8 +101,7 @@ public class UserOperationsService {
     public AuthResponse stepUp(long userId, String code) {
         User user = getUser(userId);
         loginAttemptService.ensureNotLocked(user); // fast path; verifyForUser re-checks under the row lock
-        if (!twoFactor.verifyForUser(userId, code)) {
-            loginAttemptService.recordFailure(userId);
+        if (!twoFactor.verifyForUser(userId, code)) { // counts the failure (429 once locked)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That code didn't match");
         }
         return new AuthResponse(tokenIssuer.issueAccess(user, List.of("pwd", "otp")), UserResponse.of(user));

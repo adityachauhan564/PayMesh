@@ -291,4 +291,27 @@ class TwoFactorIntegrationTest {
         assertThat(post("/api/users/me/2fa/setup", wrong, account.token()).statusCode()).isEqualTo(429);
         assertThat(post("/api/users/me/2fa/setup", "{\"password\":\"secret123\"}", account.token()).statusCode()).isEqualTo(429);
     }
+
+    /** Parallel guesses are serialised against the failure counter: at most (limit - 1) are even evaluated. */
+    @Test
+    void parallelWrongCodesCannotSlipPastTheLock() throws Exception {
+        Account account = register();
+        enrol(account);
+        String wrong = "{\"password\":\"secret123\",\"code\":\"000000\"}";
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(12);
+        try {
+            List<java.util.concurrent.Callable<Integer>> guesses = new java.util.ArrayList<>();
+            for (int i = 0; i < 12; i++) {
+                guesses.add(() -> post("/api/users/me/2fa/disable", wrong, account.token()).statusCode());
+            }
+            List<Integer> statuses = new java.util.ArrayList<>();
+            for (var f : pool.invokeAll(guesses)) {
+                statuses.add(f.get());
+            }
+            assertThat(statuses).containsOnly(400, 429);
+            assertThat(statuses.stream().filter(s -> s == 400).count()).isLessThanOrEqualTo(4);
+        } finally {
+            pool.shutdown();
+        }
+    }
 }

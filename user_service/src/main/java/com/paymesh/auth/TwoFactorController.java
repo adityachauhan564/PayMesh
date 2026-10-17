@@ -66,16 +66,11 @@ public class TwoFactorController {
         });
     }
 
-    /** The failure is recorded after the check's transaction has rolled back, so it sticks. */
+    /** Fast refusal for a locked account; TwoFactor re-checks under the row lock and counts failures itself. */
     private <T> T countingWrongSecrets(long userId, Supplier<T> action) {
         loginAttempts.ensureNotLocked(users.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found")));
-        try {
-            return action.get();
-        } catch (TwoFactor.WrongSecretException e) {
-            loginAttempts.recordFailure(userId); // throws 429 once this failure locks the account
-            throw e;
-        }
+        return action.get();
     }
 
     private static long userId(Jwt jwt) {

@@ -5,6 +5,7 @@ import com.paymesh.dto.SendMailNotification;
 import com.paymesh.model.User;
 import com.paymesh.outbox.Outbox;
 import com.paymesh.service.AccountLockedException;
+import com.paymesh.service.LoginAttemptService;
 import com.paymesh.repository.UserRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -33,7 +34,7 @@ public class TwoFactor {
     public record Setup(String secret, String otpauthUri) {
     }
 
-    /** A wrong code or password; the controller counts it toward the account lockout (outside this transaction). */
+    /** A wrong code or password. Already counted toward the lockout, in the transaction that checked it. */
     public static class WrongSecretException extends ResponseStatusException {
         WrongSecretException(HttpStatus status, String message) {
             super(status, message);
@@ -48,20 +49,22 @@ public class TwoFactor {
     private final RefreshTokenRepository refreshTokens;
     private final PasswordEncoder passwordEncoder;
     private final Outbox outbox;
+    private final LoginAttemptService loginAttempts;
     private final Clock clock;
 
     public TwoFactor(UserRepository users, RecoveryCodeRepository recoveryCodes, RefreshTokenRepository refreshTokens,
-                     PasswordEncoder passwordEncoder, Outbox outbox, Clock clock) {
+                     PasswordEncoder passwordEncoder, Outbox outbox, LoginAttemptService loginAttempts, Clock clock) {
         this.users = users;
         this.recoveryCodes = recoveryCodes;
         this.refreshTokens = refreshTokens;
         this.passwordEncoder = passwordEncoder;
         this.outbox = outbox;
+        this.loginAttempts = loginAttempts;
         this.clock = clock;
     }
 
     /** Needs the password again: a stolen session alone must not be able to put its own authenticator on the account. */
-    @Transactional
+    @Transactional(noRollbackFor = {WrongSecretException.class, AccountLockedException.class})
     public Setup setup(long userId, String password) {
         User user = locked(userId);
         requirePassword(user, password);
@@ -76,7 +79,7 @@ public class TwoFactor {
     }
 
     /** Returns the recovery codes, shown to the user exactly once. */
-    @Transactional
+    @Transactional(noRollbackFor = {WrongSecretException.class, AccountLockedException.class})
     public List<String> enable(long userId, String code) {
         User user = locked(userId);
         if (user.isTotpEnabled() || user.getTotpSecret() == null) {
@@ -84,7 +87,7 @@ public class TwoFactor {
         }
         long step = Totp.matchingStep(user.getTotpSecret(), code, Totp.stepAt(clock.instant()));
         if (step < 0) {
-            throw wrongCode();
+            throw wrongCode(user);
         }
         user.setTotpEnabled(true);
         user.setTotpLastStep(step);
@@ -103,7 +106,7 @@ public class TwoFactor {
     }
 
     /** Needs the password and a valid code: a stolen session alone must not be able to switch two-factor off. */
-    @Transactional
+    @Transactional(noRollbackFor = {WrongSecretException.class, AccountLockedException.class})
     public void disable(long userId, String password, String code) {
         User user = locked(userId);
         requirePassword(user, password);
@@ -111,7 +114,7 @@ public class TwoFactor {
             return;
         }
         if (!verify(user, code)) {
-            throw wrongCode();
+            throw wrongCode(user);
         }
         user.setTotpEnabled(false);
         user.setTotpSecret(null);
@@ -132,8 +135,18 @@ public class TwoFactor {
 
     private void requirePassword(User user, String password) {
         if (password == null || !passwordEncoder.matches(password, user.getPasswordHash())) {
+            countFailure(user);
             throw new WrongSecretException(HttpStatus.FORBIDDEN, "Password is incorrect");
         }
+    }
+
+    /**
+     * Counted in this transaction, while it still holds the user's row lock, and kept on rollback (noRollbackFor):
+     * the next request waiting on that lock sees the new count, so parallel guesses can't all slip past the limit.
+     * Throws AccountLockedException (429) when this failure locks the account.
+     */
+    private void countFailure(User user) {
+        loginAttempts.recordFailure(user.getUserId());
     }
 
     /**
@@ -162,10 +175,18 @@ public class TwoFactor {
                 .orElse(false);
     }
 
-    /** verify() under the user's row lock, for callers without a transaction of their own (login, step-up). */
-    @Transactional
+    /**
+     * verify() under the user's row lock, for login and step-up. A wrong code is counted toward the lockout in the
+     * same transaction (and may throw AccountLockedException); callers must not count it again.
+     */
+    @Transactional(noRollbackFor = AccountLockedException.class)
     public boolean verifyForUser(long userId, String code) {
-        return verify(locked(userId), code);
+        User user = locked(userId);
+        if (verify(user, code)) {
+            return true;
+        }
+        countFailure(user);
+        return false;
     }
 
     /**
@@ -181,7 +202,8 @@ public class TwoFactor {
         return user;
     }
 
-    private static ResponseStatusException wrongCode() {
+    private ResponseStatusException wrongCode(User user) {
+        countFailure(user);
         return new WrongSecretException(HttpStatus.BAD_REQUEST, "That code didn't match. Check the time on your phone and try again");
     }
 }
