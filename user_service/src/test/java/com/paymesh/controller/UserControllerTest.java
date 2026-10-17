@@ -39,7 +39,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(value = UserController.class, properties = "jwt.secret=user-service-test-secret-at-least-32-bytes")
+@WebMvcTest(value = UserController.class)
 @Import({SecurityConfig.class, UserOperationsService.class, LoginAttemptService.class, LockoutNotifier.class,
         JwtKeys.class, TokenIssuer.class, AuthConfig.class})
 class UserControllerTest {

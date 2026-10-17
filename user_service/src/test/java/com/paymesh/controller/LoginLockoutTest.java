@@ -41,7 +41,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Lockout after 3 failures for 15 minutes (shortened attempt count to keep the tests readable). */
 @WebMvcTest(value = UserController.class, properties = {
-        "jwt.secret=user-service-test-secret-at-least-32-bytes",
         "login.lockout.max-failed-attempts=3",
         "login.lockout.duration=15m"})
 @Import({SecurityConfig.class, UserOperationsService.class, LoginAttemptService.class, LockoutNotifier.class,

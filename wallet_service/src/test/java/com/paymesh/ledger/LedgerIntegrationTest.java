@@ -30,8 +30,7 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Real MySQL, real locking: the ledger must agree with every wallet after any mix of concurrent payments. */
-@SpringBootTest(properties = {"jwt.secret=0123456789abcdef0123456789abcdef",
-        "spring.kafka.listener.auto-startup=false", "outbox.poll-interval-ms=3600000"})
+@SpringBootTest(properties = {"spring.kafka.listener.auto-startup=false", "outbox.poll-interval-ms=3600000"})
 class LedgerIntegrationTest {
 
     private static final long[] USERS = {1, 2, 3, 4, 5};

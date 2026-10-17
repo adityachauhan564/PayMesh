@@ -32,7 +32,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(value = TransactionController.class, properties = "jwt.secret=transaction-service-test-secret-32-bytes")
+@WebMvcTest(value = TransactionController.class)
 @Import({SecurityConfig.class, TransactionService.class})
 class TransactionControllerTest {
 

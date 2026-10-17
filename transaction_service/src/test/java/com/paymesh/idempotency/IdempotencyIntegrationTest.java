@@ -33,8 +33,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /** Real MySQL: concurrent duplicates are settled by the unique index, which only a real database shows. */
-@SpringBootTest(properties = {"jwt.secret=0123456789abcdef0123456789abcdef",
-        "spring.kafka.listener.auto-startup=false", "outbox.poll-interval-ms=3600000"})
+@SpringBootTest(properties = {"spring.kafka.listener.auto-startup=false", "outbox.poll-interval-ms=3600000"})
 @AutoConfigureMockMvc
 class IdempotencyIntegrationTest {
 

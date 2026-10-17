@@ -22,7 +22,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(value = WalletController.class, properties = "jwt.secret=wallet-service-test-secret-at-least-32-bytes")
+@WebMvcTest(value = WalletController.class)
 @Import(SecurityConfig.class)
 class WalletControllerTest {
 
