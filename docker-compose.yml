@@ -76,6 +76,8 @@ services:
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+      # Base URL for links in emails (account unlock)
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:4200}
       REDIS_HOST: redis
     depends_on:
       mysql: { condition: service_healthy }
@@ -99,6 +101,8 @@ services:
       DB_URL: jdbc:mysql://mysql:3306/txn_db
       DB_USERNAME: txn_svc
       DB_PASSWORD: ${TXN_DB_PASSWORD:?set it in .env (copy .env.example)}
+      # Payments above this need a fresh two-factor code from users who turned it on
+      STEP_UP_THRESHOLD: ${STEP_UP_THRESHOLD:-5000}
 
   notification-service:
     <<: *spring-service

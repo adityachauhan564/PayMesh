@@ -262,7 +262,12 @@ flowchart TD
     find -- "yes" --> locked{"Account locked?"}
     locked -- "yes" --> r2["429 · 'Try again in N minutes'<br/>even with the correct password"]
     locked -- "no" --> pw{"Password matches?<br/>(BCrypt)"}
-    pw -- "yes" --> ok["Reset failure count<br/>200 + access token (15 min)<br/>+ refresh cookie"]
+    pw -- "yes" --> mfa{"Two-factor on?"}
+    mfa -- "no" --> ok["Reset failure count<br/>200 + access token (15 min)<br/>+ refresh cookie"]
+    mfa -- "yes, no code sent" --> r401m["401 mfa-required<br/>(app asks for the code)"]
+    mfa -- "yes, code sent" --> code{"TOTP or recovery code<br/>valid and unused?"}
+    code -- "yes" --> ok
+    code -- "no" --> count
     pw -- "no" --> count["Count failure under a row lock"]
     count --> fifth{"5th failure in a row?"}
     fifth -- "no" --> r401
@@ -270,10 +275,13 @@ flowchart TD
     lock --> r2
 ```
 
+The lockout email carries a **one-time unlock link** (30 minutes, single use, replaced by any newer lock). It opens the web app's `/unlock` page, which POSTs the token: opening the link alone changes nothing, so mail scanners can't unlock anyone.
+
 | Defence | Where | Stops | Default |
 |---|---|---|---|
 | **Per-IP rate limit** | gateway + Redis | one machine hammering many accounts | 5 attempts, then 1 every 12 s |
-| **Per-account lockout** | user_service + MySQL | many machines hammering one account | 5 wrong passwords, then 15 min lock |
+| **Per-account lockout** | user_service + MySQL | many machines hammering one account | 5 wrong passwords **or codes**, then 15 min lock |
+| **Two-factor login** (optional) | user_service | a leaked password on its own | TOTP (RFC 6238, any authenticator app) + 8 single-use recovery codes |
 
 ---
 
@@ -485,6 +493,8 @@ Keys keep ordering per user and per transaction. Payload classes live in `paymes
 | **Sessions** | Login sets a **refresh token** in an `HttpOnly; Secure; SameSite=Strict` cookie scoped to `/api/auth` (7 days; only its SHA-256 is stored). `POST /api/auth/refresh` rotates it and returns a new access token. **Reusing** an already-rotated refresh token (theft, or a stale tab) revokes the whole session family. The web app keeps the access token **in memory only**. |
 | **Logout** | `POST /api/auth/logout` revokes the refresh family and puts the access token's `jti` on a Redis denylist (TTL = its remaining lifetime) that the gateway checks on every request: the token stops working **immediately**. |
 | **Roles** | `USER` or `ADMIN` (`roles` claim → `ROLE_*`). `/api/admin/**` requires ADMIN at the gateway and in every service. ADMIN is granted by **user id** (`ADMIN_USER_IDS`) or the `role` column, never by email (emails are unverified and editable). |
+| **Two-factor** | Optional TOTP (RFC 6238, implemented in-house and checked against the RFC's test vectors): secret on the account, a code works once (`totp_last_step`), 8 recovery codes stored as hashes (80 bits each). Setting it up or turning it off needs the **password**; wrong codes and passwords count toward the account lockout, checked under the user's row lock so parallel guesses can't slip past. Turning it on or off signs out every session and emails the owner. |
+| **Step-up** | Payments over ₹5,000 (`STEP_UP_THRESHOLD`) by users with two-factor need a token with `amr` containing `otp`, issued in the last 5 minutes; otherwise `403 step-up-required` and the app asks for the code (`POST /api/users/me/step-up`). 403, not 401, because the app treats 401 as "refresh the session". |
 | **Public endpoints** | Only `POST /api/auth/register`, `/login`, `/refresh`, `/logout` and `GET /actuator/health` (status only). Everything else needs a token; unknown paths are denied. |
 | **Ownership** | Each user sees and changes only their own profile, wallet and transactions; other people's transactions return **404**. |
 | **Brute force** | Per-IP rate limit at the gateway (Redis) and per-account lockout in user_service ([details](#3-login-two-independent-brute-force-defences)) |
@@ -541,9 +551,14 @@ Base URL: `http://localhost:8080` (the gateway). All bodies are JSON. 🔒 = nee
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | POST | `/api/auth/register` | public | Create account; returns `{token, user}` and sets the refresh cookie |
-| POST | `/api/auth/login` | public | `{username: mobile or email, password}`; returns `{token, user}` and sets the refresh cookie |
+| POST | `/api/auth/login` | public | `{username: mobile or email, password, otp?}`; returns `{token, user}` and sets the refresh cookie; `401 mfa-required` when two-factor is on and no code was sent |
 | POST | `/api/auth/refresh` | cookie | New `{token, user}` and a new cookie; `401` (cookie cleared) if expired, revoked or reused |
 | POST | `/api/auth/logout` | cookie | Ends the session (refresh family revoked, access token denylisted); always `204` |
+| POST | `/api/auth/unlock` | public | `{token}` from the lockout email's link; `204`, or `400` if invalid, used or expired |
+| POST | `/api/users/me/2fa/setup` | 🔒 | `{password}` → `{secret, otpauthUri}` for an authenticator app |
+| POST | `/api/users/me/2fa/enable` | 🔒 | `{code}` → `{recoveryCodes}` (shown once); signs out every session |
+| POST | `/api/users/me/2fa/disable` | 🔒 | `{password, code}`; signs out every session |
+| POST | `/api/users/me/step-up` | 🔒 | `{code}` → fresh `{token, user}` for large payments |
 | GET | `/api/users/me` | 🔒 | My profile |
 | PUT | `/api/users/me` | 🔒 | Update `{fullName, emailId, address}` |
 | DELETE | `/api/users/me` | 🔒 | Delete account (withdraw your balance first) |
@@ -719,6 +734,8 @@ All settings come from environment variables with local-friendly defaults.
 | `JWT_JWKS_URI` | `http://localhost:8081/.well-known/jwks.json` | gateway, wallet, transaction, notification | Where to fetch the public signing keys |
 | `ADMIN_USER_IDS` | empty | user | Comma-separated user ids that get the ADMIN role |
 | `AUTH_COOKIE_SECURE` | `true` | user | `Secure` flag on the refresh cookie (browsers treat localhost as secure; turn off only for plain-HTTP non-localhost setups) |
+| `APP_PUBLIC_URL` | `http://localhost:4200` | user | Base URL for links in emails (account unlock) |
+| `STEP_UP_THRESHOLD` | `5000` | transaction | Payments above this need a fresh two-factor code (users with two-factor on) |
 | `JWT_ISSUER` | `paymesh` | all | Expected `iss` claim |
 | `DB_URL` | `jdbc:mysql://localhost:3306/user_db` (`wallet_db`, `txn_db`) | user, wallet, transaction | The service's own schema |
 | `DB_USERNAME` / `DB_PASSWORD` | **required** (`local` profile: `user_svc` / `wallet_svc` / `txn_svc`, password `change-me-local-only`) | user, wallet, transaction | The service's own MySQL user |
@@ -818,7 +835,7 @@ paymesh/
 
 - **Emails are at-most-once.** Duplicates are suppressed by `eventId`; a crash between claiming the id and sending can lose one email (by design: a duplicate payment email is worse than a missing one). If Redis is down, mail is sent without the duplicate check.
 - **Notification dead letters** stay on `SEND_NOTIFICATION.DLT` (notification_service has no database); replay them with the Kafka CLI.
-- **Lockout can be abused**: someone who knows a mobile number can keep that account locked, 15 minutes at a time. Mitigations: CAPTCHA after failures, or unlock by email.
+- **Lockout can be abused**: someone who knows a mobile number can keep locking that account. The owner can unlock it straight away from the email link; a CAPTCHA after failures would stop the nuisance itself.
 - **Users behind one shared IP** (office, mobile carrier NAT) share a login rate-limit bucket.
 - **Simulated bank**: add money and withdraw don't call a real payment gateway.
 
