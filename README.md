@@ -539,6 +539,8 @@ Base URL: `http://localhost:8080` (the gateway). All bodies are JSON. 🔒 = nee
 | GET | `/api/transactions?page=0&size=20` | 🔒 | My history, newest first |
 | GET | `/api/transactions/{id}` | 🔒 | Details (404 if I'm not sender or receiver) |
 
+**Idempotency-Key (optional, the web app always sends one):** send any unique string (≤ 255 chars, e.g. a UUID) with `POST /api/transactions`, and a retry of the same request — double click, timeout, flaky network — returns the **original** response with `Idempotent-Replayed: true` instead of creating a second payment. Reusing a key with a different body is `422`. Keys are per user and remembered for 24 h. Only successful creations are remembered, so a request rejected by validation can be fixed and retried with the same key.
+
 **Validation rules:** mobile `[6-9]` + 9 digits · password 8–64 chars · PAN `ABCDE1234F` (optional) · amount ₹1–₹1,00,000 with at most 2 decimals · remark up to 100 chars.
 
 ### Examples
@@ -555,6 +557,9 @@ TOKEN=$(curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: applicat
 # Add money
 curl -s -X POST localhost:8080/api/transactions -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"type":"ADD_MONEY","amount":1000}'
+
+# Safe to retry: the same Idempotency-Key never pays twice
+curl -s -X POST localhost:8080/api/transactions -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json'   -H 'Idempotency-Key: 6f1c2a9e-topup-1' -d '{"type":"ADD_MONEY","amount":1000}'
 
 # Send money (find the receiver's userId with /api/users/lookup first)
 curl -s -X POST localhost:8080/api/transactions -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
@@ -690,6 +695,7 @@ All settings come from environment variables with local-friendly defaults.
 | `DB_USERNAME` / `DB_PASSWORD` | **required** (`local` profile: `user_svc` / `wallet_svc` / `txn_svc`, password `change-me-local-only`) | user, wallet, transaction | The service's own MySQL user |
 | `USER_DB_PASSWORD` / `WALLET_DB_PASSWORD` / `TXN_DB_PASSWORD` | **required** (compose only) | mysql init, services | Passwords for the three service users |
 | `KAFKA_SERVERS` | `localhost:9092` | all services | Kafka bootstrap servers |
+| `IDEMPOTENCY_RETENTION` | `PT24H` | transaction | How long `Idempotency-Key` responses are remembered |
 | `LEDGER_RECONCILE_CRON` | `0 30 2 * * *` (02:30 daily) | wallet | When the ledger reconciliation runs (Spring cron, one replica via ShedLock) |
 | `USER_SERVICE_URL` / `WALLET_SERVICE_URL` / `TRANSACTION_SERVICE_URL` | `http://localhost:8081` / `:8091` / `:8086` | gateway | Route targets |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / none | gateway | Rate-limit store |
@@ -768,6 +774,7 @@ paymesh/
 | **Schema per service, Flyway migrations, `ddl-auto=validate`** | Services can't couple through tables; every schema change is reviewed SQL with a history; a drifted schema fails fast at startup |
 | **Double-entry ledger plus a cached balance** | Reads stay O(1); every rupee is explained by balanced postings, and a nightly reconciliation proves cache and ledger agree |
 | **Ledger rules as a pure function** | The invariants (balanced, right accounts) are property-tested over thousands of generated payments, independent of Spring and MySQL |
+| **Idempotency key stored in the payment's own transaction** | Key, payment and outbox event commit together; concurrent duplicates serialise on the unique `(user, key)` index and replay the winner's response, with no lock service |
 | **`BigDecimal` for money** | `double` can't represent ₹0.10 exactly |
 | **ProblemDetail (RFC 7807) everywhere** | One error shape for the UI, from the gateway and every service |
 | **`spring.jpa.open-in-view=false` in user_service** | With it on, the row-locked read returned a stale cached copy and concurrent failed logins overwrote each other's count |
