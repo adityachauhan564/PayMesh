@@ -403,7 +403,7 @@ The outbox is what normally breaks a trace: the event is written in the request'
 
 Plus HTTP, JVM, and Kafka client metrics (consumer lag included). Tags stay low-cardinality: never user ids, transaction ids or amounts.
 
-**Provisioned as code** (`deploy/observability`): two dashboards (*Payments*; *Messaging & ledger*) and three alert rules: outbox backlog above 100 for 5 minutes, any dead letter waiting, any ledger mismatch.
+**Provisioned as code** (`deploy/helm/paymesh/files/observability`): two dashboards (*Payments*; *Messaging & ledger*) and three alert rules: outbox backlog above 100 for 5 minutes, any dead letter waiting, any ledger mismatch.
 
 **Emails and mobile numbers are masked before storage.** The collector's `transform/scrub` step masks email addresses and Indian mobile numbers (with or without `+91`/`0`) in every log line, log and span attribute, span name and span event (exception messages) before anything is written, and notification_service logs a mail it isn't sending with a masked recipient and no body (the full text only at DEBUG). Scheduled pollers and health probes aren't traced, so they don't bury real requests.
 
@@ -499,7 +499,7 @@ erDiagram
     WALLET ||..|| LEDGER_ACCOUNT : "balance = credits - debits"
 ```
 
-Schemas and users are created once, with the MySQL volume, by `deploy/mysql/init/01-service-schemas.sh`. Each service's tables come from Flyway migrations in `src/main/resources/db/migration`, and Hibernate only checks them (`ddl-auto=validate`), so a mismatch stops the service at startup instead of silently altering tables.
+Schemas and users are created once, with the MySQL volume, by `deploy/helm/paymesh/files/mysql-init/01-service-schemas.sh`. Each service's tables come from Flyway migrations in `src/main/resources/db/migration`, and Hibernate only checks them (`ddl-auto=validate`), so a mismatch stops the service at startup instead of silently altering tables.
 
 **Schema changes:** add `V<n>__<what_changed>.sql` next to the service's existing migrations. Never edit a migration that has already run; Flyway checksums it. Enum columns are MySQL `enum(...)`, so a new enum constant needs an `ALTER TABLE ... MODIFY` migration. Once a service runs more than one replica, make changes **expand then contract**: a migration must keep working for the previous version still running during a rollout (add a column as nullable or with a default, backfill, and tighten it in a later release).
 
@@ -576,7 +576,7 @@ flowchart LR
     end
 ```
 
-Only the gateway (and the static UI) may be reachable from the internet. Use no published ports in Docker, `ClusterIP` in Kubernetes, or security groups that admit only the gateway. Behind a load balancer, set `TRUSTED_PROXY_COUNT=1`, otherwise all users share the load balancer's rate-limit bucket. Locally, services also listen on `localhost` ports for debugging.
+Only the gateway (and the static UI) may be reachable from the internet. Use no published ports in Docker, `ClusterIP` in Kubernetes, or security groups that admit only the gateway. Set `TRUSTED_PROXY_COUNT` to the number of proxies in front of the gateway: 1 behind nginx alone (compose), 2 behind Traefik plus nginx (the Helm chart sets this), otherwise all users share the load balancer's rate-limit bucket. Locally, services also listen on `localhost` ports for debugging. The Helm chart enforces this boundary with NetworkPolicies.
 
 ---
 
@@ -724,7 +724,7 @@ docker compose up -d mysql kafka redis    # MySQL :3306, Kafka :9092, Redis :637
 
 The `local` profile connects as `user_svc` / `wallet_svc` / `txn_svc` to `user_db` / `wallet_db` / `txn_db`, which compose's MySQL creates on its first start.
 
-> Already have MySQL on 3306? Start only the rest (`docker compose up -d kafka redis`), run `deploy/mysql/init/01-service-schemas.sh`'s SQL against yours (or create the three schemas and users yourself), and point the services at it with `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`.
+> Already have MySQL on 3306? Start only the rest (`docker compose up -d kafka redis`), run `deploy/helm/paymesh/files/mysql-init/01-service-schemas.sh`'s SQL against yours (or create the three schemas and users yourself), and point the services at it with `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`.
 
 #### 2. Build and start the backend
 
@@ -751,6 +751,33 @@ cd wallet-ui
 npm install
 npm start                    # http://localhost:4200, proxies /api to the gateway on :8080
 ```
+
+### Option C: Kubernetes on k3d (the production chart, locally)
+
+The Helm chart in `deploy/helm/paymesh` is the one that runs in production (k3s on AWS). [k3d](https://k3d.io) runs k3s inside Docker, so the same chart runs on your machine:
+
+```bash
+cp .env.example .env          # the script turns it into the paymesh-secrets Secret
+sh scripts/k3d-up.sh          # cluster + Strimzi + images + chart → http://localhost:8080
+kubectl -n paymesh port-forward svc/lgtm 3000:3000   # Grafana (admin/admin)
+k3d cluster delete paymesh    # remove everything
+```
+
+You need Docker (8 GB for Docker Desktop), [k3d](https://k3d.io), [Helm](https://helm.sh) 3.8 or later, and kubectl. Re-run the script after code changes: it rebuilds the images, imports them and restarts the services.
+
+| In the cluster (namespace `paymesh`) | How |
+|---|---|
+| 5 Spring services | one shared Deployment template, a values entry each; actuator liveness/readiness/startup probes; non-root, read-only root filesystem; 512 Mi each (`-XX:+UseSerialGC -XX:MaxRAMPercentage=60`) |
+| wallet-ui | nginx with `/api` proxied to the gateway, behind Traefik (k3s's ingress) |
+| Kafka | Strimzi operator, one KRaft node (controller + broker) |
+| MySQL | StatefulSet with a persistent volume; same init script as compose |
+| Redis, Grafana LGTM | Deployments (their data is disposable) |
+
+- **NetworkPolicies:** everything is denied unless allowed. Traefik can reach wallet-ui, wallet-ui can reach the gateway, and the gateway can reach the services. The services can reach user-service (for its signing keys), their own data stores and Grafana. Any other pod is refused, even inside the namespace.
+- **Autoscaling:** transaction-service scales from 1 to 3 pods at 70% CPU. Scale-up waits 3 minutes, so JVM warm-up alone doesn't add pods.
+- **Rollouts:** wallet-service uses `Recreate`, so two versions never run against the ledger at once.
+- **Memory:** about 3.2 GB in total for the whole stack.
+- **First start:** services that start before MySQL or Kafka is ready exit, and Kubernetes restarts them. A few restarts on the first start are normal.
 
 ### Try it
 
@@ -839,7 +866,8 @@ paymesh/
 │   └── src/app/
 │       ├── api.ts               HTTP client, JWT interceptor, auth guard, types
 │       └── pages/               auth · dashboard · pay · history · profile · txn-list
-├── deploy/mysql/init/           creates one schema + user per service on a new MySQL volume
+├── deploy/helm/paymesh/         Helm chart (Kubernetes); files/ holds the MySQL init script and Grafana config
+├── scripts/k3d-up.sh            runs the whole stack on a local k3d cluster
 ├── scripts/build-images.sh      builds compose images one at a time (non-ASCII path workaround)
 ├── .env.example                 secrets template for compose (copy to .env)
 ├── Dockerfile                   one image per Spring Boot service (--build-arg SERVICE=<module>)

@@ -1,0 +1,67 @@
+{{- $ctx := dict "root" $ "name" "lgtm" }}
+# Grafana with Prometheus, Loki and Tempo behind one OpenTelemetry collector, which scrubs personal data first.
+# Grafana: kubectl -n paymesh port-forward svc/lgtm 3000:3000 (admin/admin). Data is kept in the pod only.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lgtm-config
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+data:
+{{ (.Files.Glob "files/observability/*.yaml").AsConfig | indent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lgtm-dashboards
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+data:
+{{ (.Files.Glob "files/observability/dashboards/*.json").AsConfig | indent 2 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lgtm
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "paymesh.selector" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "paymesh.labels" $ctx | nindent 8 }}
+      annotations:
+        checksum/config: {{ print (.Files.Glob "files/observability/**").AsConfig | sha256sum | trunc 16 }}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: lgtm
+          image: {{ .Values.lgtm.image }}
+          ports:
+            - { name: otlp-http, containerPort: 4318 }
+            - { name: grafana, containerPort: 3000 }
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources: {{- toYaml .Values.lgtm.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /api/health, port: grafana }
+            periodSeconds: 10
+          volumeMounts:
+            - { name: config, mountPath: /otel-lgtm/otelcol-config.yaml, subPath: otelcol-config.yaml }
+            - { name: config, mountPath: /otel-lgtm/grafana/conf/provisioning/dashboards/paymesh.yaml, subPath: dashboards.yaml }
+            - { name: config, mountPath: /otel-lgtm/grafana/conf/provisioning/alerting/paymesh.yaml, subPath: alerts.yaml }
+            - { name: dashboards, mountPath: /otel-lgtm/grafana/conf/provisioning/dashboards/paymesh }
+      volumes:
+        - { name: config, configMap: { name: lgtm-config } }
+        - { name: dashboards, configMap: { name: lgtm-dashboards } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lgtm
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+spec:
+  selector: {{- include "paymesh.selector" $ctx | nindent 4 }}
+  ports:
+    - { name: otlp-http, port: 4318, targetPort: otlp-http }
+    - { name: grafana, port: 3000, targetPort: grafana }

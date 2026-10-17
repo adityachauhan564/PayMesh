@@ -1,0 +1,67 @@
+{{- $ctx := dict "root" $ "name" "wallet-ui" }}
+# The Angular app plus /api proxied to the gateway, behind Traefik (the Ingress below)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wallet-ui
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "paymesh.selector" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "paymesh.labels" $ctx | nindent 8 }}
+      annotations:
+        checksum/nginx: {{ include (print $.Template.BasePath "/wallet-ui-config.yaml") . | sha256sum | trunc 16 }}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: wallet-ui
+          image: "{{ .Values.walletUi.image }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          {{- include "paymesh.containerSecurity" . | nindent 10 }}
+          resources: {{- toYaml .Values.walletUi.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 20
+          volumeMounts:
+            - { name: nginx-conf, mountPath: /etc/nginx/conf.d/default.conf, subPath: default.conf }
+            # nginx-unprivileged keeps its pid and temp files in /tmp
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: nginx-conf, configMap: { name: wallet-ui-nginx } }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wallet-ui
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+spec:
+  selector: {{- include "paymesh.selector" $ctx | nindent 4 }}
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+---
+# Traefik ships with k3s. Phase 8 adds TLS (cert-manager) and the real host.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: paymesh
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: wallet-ui, port: { name: http } }
+      {{- with .Values.ingress.host }}
+      host: {{ . }}
+      {{- end }}

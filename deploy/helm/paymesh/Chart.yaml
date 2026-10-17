@@ -1,0 +1,6 @@
+apiVersion: v2
+name: paymesh
+description: PayMesh digital wallet - Spring Boot services, Angular UI, MySQL, Redis, Kafka (Strimzi) and Grafana LGTM
+type: application
+version: 0.1.0
+appVersion: "2.0"

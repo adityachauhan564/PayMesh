@@ -1,0 +1,110 @@
+# Local (k3d) values. Images come from scripts/build-images.sh and are imported into the cluster by scripts/k3d-up.sh.
+# Secrets live in the Secret named below (local: created from .env by the script); the chart only references it.
+secretName: paymesh-secrets
+
+image:
+  tag: latest
+  pullPolicy: IfNotPresent
+
+ingress:
+  host: ""            # "" = any host (local); Phase 8 sets the real domain
+  publicUrl: http://localhost:8080
+
+# Shared by every Spring service: small heap, serial GC, small thread stacks (spec 7.14 memory budget)
+jvm:
+  options: "-XX:+UseSerialGC -XX:MaxRAMPercentage=60 -Xss512k"
+  resources:
+    requests: { cpu: 100m, memory: 384Mi }
+    limits: { memory: 512Mi }
+
+# One entry per Spring service. env: plain values; secretEnv: ENV_NAME -> key in the Secret (missing keys are allowed).
+services:
+  user-service:
+    image: paymesh-user-service
+    port: 8081
+    data: [mysql, kafka, redis]
+    env:
+      DB_URL: jdbc:mysql://mysql:3306/user_db
+      DB_USERNAME: user_svc
+      REDIS_HOST: redis
+    secretEnv:
+      DB_PASSWORD: USER_DB_PASSWORD
+      JWT_PRIVATE_KEY: JWT_PRIVATE_KEY
+      ADMIN_USER_IDS: ADMIN_USER_IDS
+  wallet-service:
+    image: paymesh-wallet-service
+    port: 8091
+    data: [mysql, kafka]
+    # Never two versions at once against the ledger (e.g. during a ledger migration)
+    strategy: Recreate
+    env:
+      DB_URL: jdbc:mysql://mysql:3306/wallet_db
+      DB_USERNAME: wallet_svc
+    secretEnv:
+      DB_PASSWORD: WALLET_DB_PASSWORD
+  transaction-service:
+    image: paymesh-transaction-service
+    port: 8086
+    data: [mysql, kafka]
+    hpa: { minReplicas: 1, maxReplicas: 3, cpu: 70 }
+    env:
+      DB_URL: jdbc:mysql://mysql:3306/txn_db
+      DB_USERNAME: txn_svc
+      STEP_UP_THRESHOLD: "5000"
+    secretEnv:
+      DB_PASSWORD: TXN_DB_PASSWORD
+  notification-service:
+    image: paymesh-notification-service
+    port: 8082
+    data: [kafka, redis]
+    env:
+      REDIS_HOST: redis
+    secretEnv:
+      MAIL_USERNAME: MAIL_USERNAME
+      MAIL_PASSWORD: MAIL_PASSWORD
+  api-gateway:
+    image: paymesh-api-gateway
+    port: 8080
+    data: [redis]
+    env:
+      USER_SERVICE_URL: http://user-service:8081
+      WALLET_SERVICE_URL: http://wallet-service:8091
+      TRANSACTION_SERVICE_URL: http://transaction-service:8086
+      REDIS_HOST: redis
+      # Traefik replaces any client-sent X-Forwarded-For, then wallet-ui's nginx appends Traefik's address: 2 hops.
+      # Safe only because the NetworkPolicies let nothing but wallet-ui reach the gateway.
+      # Traefik sees the real client only if its Service has externalTrafficPolicy: Local; k3s's default (Cluster)
+      # SNATs every client to one node address, so all clients share one rate-limit bucket. Phase 8 sets Local.
+      TRUSTED_PROXY_COUNT: "2"
+
+walletUi:
+  image: paymesh-wallet-ui
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { memory: 64Mi }
+
+mysql:
+  image: mysql:8.4
+  storage: 2Gi
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 768Mi }
+
+redis:
+  image: redis:7.4-alpine
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { memory: 128Mi }
+
+kafka:
+  storage: 2Gi
+  resources:
+    requests: { cpu: 200m, memory: 768Mi }
+    limits: { memory: 1Gi }
+  heap: 512m
+
+lgtm:
+  image: grafana/otel-lgtm:0.35.0
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 1Gi }

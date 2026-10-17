@@ -1,0 +1,79 @@
+{{- $ctx := dict "root" $ "name" "mysql" }}
+# One MySQL server, one schema + user per service (created by the init script on a new volume, as in compose)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+data:
+{{ (.Files.Glob "files/mysql-init/*").AsConfig | indent 2 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels: {{- include "paymesh.selector" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "paymesh.labels" $ctx | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      containers:
+        - name: mysql
+          image: {{ .Values.mysql.image }}
+          env:
+            {{- range list "MYSQL_ROOT_PASSWORD" "USER_DB_PASSWORD" "WALLET_DB_PASSWORD" "TXN_DB_PASSWORD" }}
+            - name: {{ . }}
+              valueFrom:
+                secretKeyRef: { name: {{ $.Values.secretName }}, key: {{ . }} }
+            {{- end }}
+          ports:
+            - { name: mysql, containerPort: 3306 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          resources: {{- toYaml .Values.mysql.resources | nindent 12 }}
+          # TCP, not the socket: during first-run init MySQL serves only the socket
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$MYSQL_ROOT_PASSWORD\" --silent"]
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            timeoutSeconds: 5
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/mysql }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d, readOnly: true }
+      volumes:
+        - { name: init, configMap: { name: mysql-init } }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: { storage: {{ .Values.mysql.storage }} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  labels: {{- include "paymesh.labels" $ctx | nindent 4 }}
+spec:
+  selector: {{- include "paymesh.selector" $ctx | nindent 4 }}
+  ports:
+    - { name: mysql, port: 3306, targetPort: mysql }
