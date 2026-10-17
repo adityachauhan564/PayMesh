@@ -87,7 +87,9 @@ public class KafkaConsumer {
 
     private void send(SendMailNotification mail) {
         if (mailFrom.isBlank()) {
-            log.info("MAIL_USERNAME not set, printing mail instead.\nTo: {}\nSubject: {}\n{}", mail.receiverMailId(), mail.subject(), mail.message());
+            // Logs are shipped (Loki): no address or body at INFO. The full mail is at DEBUG for local development.
+            log.info("MAIL_USERNAME not set, not sending \"{}\" to {}", mail.subject(), mask(mail.receiverMailId()));
+            log.debug("Mail to {}\nSubject: {}\n{}", mail.receiverMailId(), mail.subject(), mail.message());
             return;
         }
         SimpleMailMessage simpleMailMessage = new SimpleMailMessage();
@@ -96,5 +98,11 @@ public class KafkaConsumer {
         simpleMailMessage.setSubject(mail.subject());
         simpleMailMessage.setText(mail.message());
         javaMailSender.send(simpleMailMessage);
+    }
+
+    /** a***@example.com: enough to tell mails apart in a log, not enough to identify the person. */
+    static String mask(String email) {
+        int at = email == null ? -1 : email.indexOf('@');
+        return at < 1 ? "***" : email.charAt(0) + "***" + email.substring(at);
     }
 }

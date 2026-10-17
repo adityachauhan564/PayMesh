@@ -1,0 +1,9 @@
+# Provisions the PayMesh dashboards (JSON in ./dashboards) into Grafana at startup
+apiVersion: 1
+providers:
+  - name: PayMesh
+    folder: PayMesh
+    type: file
+    disableDeletion: true
+    options:
+      path: /otel-lgtm/grafana/conf/provisioning/dashboards/paymesh

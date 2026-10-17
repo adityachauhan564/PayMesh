@@ -14,6 +14,9 @@ x-service-env: &service-env
   KAFKA_SERVERS: kafka:19092
   # Tokens are RS256, signed by user-service; everyone else verifies them against its public keys
   JWT_JWKS_URI: http://user-service:8081/.well-known/jwks.json
+  # Traces, logs and metrics to Grafana (the lgtm service)
+  OTLP_ENABLED: "true"
+  OTLP_ENDPOINT: http://lgtm:4318
 
 services:
   mysql:
@@ -58,6 +61,17 @@ services:
       timeout: 10s
       retries: 12
       start_period: 15s
+
+  # Grafana with Prometheus (metrics), Loki (logs) and Tempo (traces) behind one OpenTelemetry collector.
+  # The collector config scrubs emails and mobile numbers before anything is stored. Grafana: http://localhost:3000
+  lgtm:
+    image: grafana/otel-lgtm:0.35.0
+    ports: ["127.0.0.1:3000:3000"]
+    volumes:
+      - ./deploy/observability/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml:ro
+      - ./deploy/observability/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/paymesh.yaml:ro
+      - ./deploy/observability/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards/paymesh:ro
+      - ./deploy/observability/alerts.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/paymesh.yaml:ro
 
   # Login rate-limit buckets (api_gateway) and notification eventId claims. Losing them is harmless, so no volume.
   redis:
@@ -114,6 +128,8 @@ services:
       KAFKA_SERVERS: kafka:19092
       REDIS_HOST: redis
       JWT_JWKS_URI: http://user-service:8081/.well-known/jwks.json
+      OTLP_ENABLED: "true"
+      OTLP_ENDPOINT: http://lgtm:4318
       # Unset = mails are logged instead of sent (see notification_service)
       MAIL_USERNAME: ${MAIL_USERNAME:-}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
@@ -128,6 +144,8 @@ services:
       TRANSACTION_SERVICE_URL: http://transaction-service:8086
       REDIS_HOST: redis
       JWT_JWKS_URI: http://user-service:8081/.well-known/jwks.json
+      OTLP_ENABLED: "true"
+      OTLP_ENDPOINT: http://lgtm:4318
       # Every request arrives through the wallet-ui nginx, which appends the client IP to X-Forwarded-For.
       # Safe only because the gateway port is not published: nothing can reach it around nginx.
       TRUSTED_PROXY_COUNT: 1
