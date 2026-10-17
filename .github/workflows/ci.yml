@@ -52,3 +52,14 @@ jobs:
       - uses: actions/checkout@v7
       - run: cp .env.example .env
       - run: sh scripts/build-images.sh
+
+  # The chart must lint and render (Strimzi's CRDs aren't needed to render)
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.0
+      - run: helm lint deploy/helm/paymesh
+      - run: helm template paymesh deploy/helm/paymesh -n paymesh > /dev/null

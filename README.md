@@ -576,7 +576,7 @@ flowchart LR
     end
 ```
 
-Only the gateway (and the static UI) may be reachable from the internet. Use no published ports in Docker, `ClusterIP` in Kubernetes, or security groups that admit only the gateway. Behind a load balancer, set `TRUSTED_PROXY_COUNT=1`, otherwise all users share the load balancer's rate-limit bucket. Locally, services also listen on `localhost` ports for debugging.
+Only the gateway (and the static UI) may be reachable from the internet. Use no published ports in Docker, `ClusterIP` in Kubernetes, or security groups that admit only the gateway. Set `TRUSTED_PROXY_COUNT` to the number of proxies in front of the gateway: 1 behind nginx alone (compose), 2 behind Traefik plus nginx (the Helm chart sets this), otherwise all users share the load balancer's rate-limit bucket. Locally, services also listen on `localhost` ports for debugging. The Helm chart enforces this boundary with NetworkPolicies.
 
 ---
 
@@ -751,6 +751,33 @@ cd wallet-ui
 npm install
 npm start                    # http://localhost:4200, proxies /api to the gateway on :8080
 ```
+
+### Option C: Kubernetes on k3d (the production chart, locally)
+
+The Helm chart in `deploy/helm/paymesh` is the one that runs in production (k3s on AWS). [k3d](https://k3d.io) runs k3s inside Docker, so the same chart runs on your machine:
+
+```bash
+cp .env.example .env          # the script turns it into the paymesh-secrets Secret
+sh scripts/k3d-up.sh          # cluster + Strimzi + images + chart → http://localhost:8080
+kubectl -n paymesh port-forward svc/lgtm 3000:3000   # Grafana (admin/admin)
+k3d cluster delete paymesh    # remove everything
+```
+
+You need Docker (8 GB for Docker Desktop), [k3d](https://k3d.io), [Helm](https://helm.sh) 3.8 or later, and kubectl. Re-run the script after code changes: it rebuilds the images, imports them and restarts the services.
+
+| In the cluster (namespace `paymesh`) | How |
+|---|---|
+| 5 Spring services | one shared Deployment template, a values entry each; actuator liveness/readiness/startup probes; non-root, read-only root filesystem; 512 Mi each (`-XX:+UseSerialGC -XX:MaxRAMPercentage=60`) |
+| wallet-ui | nginx with `/api` proxied to the gateway, behind Traefik (k3s's ingress) |
+| Kafka | Strimzi operator, one KRaft node (controller + broker) |
+| MySQL | StatefulSet with a persistent volume; same init script as compose |
+| Redis, Grafana LGTM | Deployments (their data is disposable) |
+
+- **NetworkPolicies:** everything is denied unless allowed. Traefik can reach wallet-ui, wallet-ui can reach the gateway, and the gateway can reach the services. The services can reach user-service (for its signing keys), their own data stores and Grafana. Any other pod is refused, even inside the namespace.
+- **Autoscaling:** transaction-service scales from 1 to 3 pods at 70% CPU. Scale-up waits 3 minutes, so JVM warm-up alone doesn't add pods.
+- **Rollouts:** wallet-service uses `Recreate`, so two versions never run against the ledger at once.
+- **Memory:** about 3.2 GB in total for the whole stack.
+- **First start:** services that start before MySQL or Kafka is ready exit, and Kubernetes restarts them. A few restarts on the first start are normal.
 
 ### Try it
 
