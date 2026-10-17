@@ -2,6 +2,7 @@ import { Component, inject, OnInit, signal } from '@angular/core';
 import { CurrencyPipe, KeyValuePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
+import { HttpErrorResponse } from '@angular/common/http';
 import { Api, BILL_CATEGORIES, Txn, TxnType, errorMessage, sleep } from '../api';
 
 const TABS: { type: TxnType; label: string }[] = [
@@ -137,6 +138,12 @@ export class PayPage implements OnInit {
     }
   }
 
+  /**
+   * One key per payment attempt. Kept when the request may have reached the server (network error, 5xx), so
+   * pressing Pay again replays instead of paying twice; renewed once the server has answered.
+   */
+  private idempotencyKey = crypto.randomUUID();
+
   async pay() {
     this.busy.set(true);
     this.error.set('');
@@ -145,7 +152,14 @@ export class PayPage implements OnInit {
       if (this.type() === 'TRANSFER') Object.assign(body, { receiverId: this.receiver()!.userId, remark: this.remark || null });
       if (this.type() === 'BILL_PAYMENT') Object.assign(body, { billCategory: this.billCategory, billAccount: this.billAccount });
 
-      let txn = await this.api.createTxn(body);
+      let txn: Txn;
+      try {
+        txn = await this.api.createTxn(body, this.idempotencyKey);
+        this.idempotencyKey = crypto.randomUUID();
+      } catch (e) {
+        if (e instanceof HttpErrorResponse && e.status >= 400 && e.status < 500) this.idempotencyKey = crypto.randomUUID();
+        throw e;
+      }
       this.result.set(txn);
       // The wallet applies the payment asynchronously (Kafka); poll until it settles.
       for (let i = 0; i < 30 && txn.status === 'PENDING'; i++) {
