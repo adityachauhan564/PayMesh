@@ -2,7 +2,8 @@
 # One image definition for every Spring Boot service; pick the module with --build-arg SERVICE=<module dir>.
 # The whole reactor is needed to build any one service (root pom + paymesh-common).
 
-FROM maven:3.9-eclipse-temurin-26 AS build
+# JDK 21 = the project's Java version; Lombok's annotation processing breaks on newer javac (JDK 26: getters missing)
+FROM maven:3.9-eclipse-temurin-21 AS build
 ARG SERVICE
 WORKDIR /src
 COPY . .
