@@ -31,6 +31,9 @@ public class TransactionController {
     @Autowired
     private IdempotentPayments idempotentPayments;
 
+    @Autowired
+    private StepUpPolicy stepUpPolicy;
+
     /**
      * Returns immediately with status PENDING; poll GET /{id} for the outcome. With an Idempotency-Key, a retry of the
      * same request returns the original response (marked Idempotent-Replayed) instead of creating a second payment.
@@ -38,6 +41,7 @@ public class TransactionController {
     @PostMapping
     public ResponseEntity<?> create(@AuthenticationPrincipal Jwt jwt, @RequestBody @Valid CreateTransactionRequest request,
                                     @RequestHeader(name = "Idempotency-Key", required = false) String key) {
+        stepUpPolicy.check(jwt, request.amount());
         long userId = Long.parseLong(jwt.getSubject());
         String userName = jwt.getClaimAsString("name");
         if (key == null) {

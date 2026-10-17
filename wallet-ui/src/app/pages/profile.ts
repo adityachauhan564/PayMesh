@@ -1,3 +1,4 @@
+import QRCode from 'qrcode';
 import { Component, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api, errorMessage } from '../api';
@@ -38,6 +39,40 @@ import { Api, errorMessage } from '../api';
     </section>
 
     <section class="card">
+      <h3>Two-factor login</h3>
+      @if (recoveryCodes().length) {
+        <p class="ok">Two-factor login is on. Other devices were signed out.</p>
+        <p class="muted">Save these recovery codes somewhere safe. Each works once if you lose your phone; they won't be shown again.</p>
+        <pre class="codes">{{ recoveryCodes().join('
+') }}</pre>
+      } @else if (twoFactorOn()) {
+        <p class="muted">On. Payments over Rs. 5,000 ask for a code.</p>
+        <form #df="ngForm" (ngSubmit)="df.valid && disable2fa()">
+          <div class="row">
+            <label>Password <input name="pw" type="password" [(ngModel)]="tfPassword" required autocomplete="current-password" /></label>
+            <label>Code <input name="code" [(ngModel)]="tfCode" required autocomplete="one-time-code" maxlength="19" /></label>
+          </div>
+          <button type="submit" [disabled]="df.invalid">Turn off</button>
+        </form>
+      } @else if (setup()) {
+        <p class="muted">Scan this with Google Authenticator, Authy or 1Password, then enter the 6-digit code it shows.</p>
+        @if (qr()) { <img class="qr" [src]="qr()" alt="QR code for your authenticator app" width="200" height="200" /> }
+        <p class="muted small">Can't scan? Enter this key instead: <code>{{ setup()!.secret }}</code></p>
+        <form #ef="ngForm" (ngSubmit)="ef.valid && enable2fa()">
+          <label>Code <input name="code" [(ngModel)]="tfCode" required autocomplete="one-time-code" inputmode="numeric" maxlength="6" /></label>
+          <button class="primary" [disabled]="ef.invalid">Turn on</button>
+        </form>
+      } @else {
+        <p class="muted">Ask for a code from your phone at login and for large payments.</p>
+        <form #sf="ngForm" (ngSubmit)="sf.valid && setup2fa()">
+          <label>Password <input name="pw" type="password" [(ngModel)]="tfPassword" required autocomplete="current-password" /></label>
+          <button type="submit" [disabled]="sf.invalid">Set up</button>
+        </form>
+      }
+      @if (tfError()) { <p class="error">{{ tfError() }}</p> }
+    </section>
+
+    <section class="card">
       <button type="button" (click)="api.logout()">Log out</button>
       <button type="button" class="danger" (click)="deleteAccount()">Delete account</button>
     </section>
@@ -54,13 +89,56 @@ export class ProfilePage implements OnInit {
   limitsOk = signal(false);
   limitsLoaded = signal(false);
 
+  twoFactorOn = signal(false);
+  setup = signal<{ secret: string; otpauthUri: string } | null>(null);
+  qr = signal('');
+  recoveryCodes = signal<string[]>([]);
+  tfError = signal('');
+  tfPassword = '';
+  tfCode = '';
+
   ngOnInit() {
     const u = this.api.user()!;
+    this.twoFactorOn.set(!!u.twoFactorEnabled);
     this.profile = { fullName: u.fullName, emailId: u.emailId, address: u.address ?? '' };
     this.api.wallet().then((w) => {
       this.limits = { dailyLimit: w.dailyLimit, dailyTransactionLimit: w.dailyTransactionLimit };
       this.limitsLoaded.set(true);
     }).catch((e) => this.limitsMsg.set(errorMessage(e)));
+  }
+
+  async setup2fa() {
+    await this.twoFactor(async () => {
+      const setup = await this.api.setup2fa(this.tfPassword);
+      this.qr.set(await QRCode.toDataURL(setup.otpauthUri, { width: 200, margin: 1 }));
+      this.setup.set(setup);
+    });
+  }
+
+  async enable2fa() {
+    await this.twoFactor(async () => {
+      this.recoveryCodes.set((await this.api.enable2fa(this.tfCode)).recoveryCodes);
+      this.twoFactorOn.set(true);
+      this.setup.set(null);
+    });
+  }
+
+  async disable2fa() {
+    await this.twoFactor(async () => {
+      await this.api.disable2fa(this.tfPassword, this.tfCode);
+      this.twoFactorOn.set(false);
+    });
+  }
+
+  private async twoFactor(action: () => Promise<void>) {
+    this.tfError.set('');
+    try {
+      await action();
+      this.tfPassword = '';
+      this.tfCode = '';
+    } catch (e) {
+      this.tfError.set(errorMessage(e));
+    }
   }
 
   async saveProfile() {

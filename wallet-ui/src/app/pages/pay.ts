@@ -3,7 +3,7 @@ import { CurrencyPipe, KeyValuePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Api, BILL_CATEGORIES, Txn, TxnType, errorMessage, sleep } from '../api';
+import { Api, BILL_CATEGORIES, Txn, TxnType, errorMessage, isProblem, sleep } from '../api';
 
 const TABS: { type: TxnType; label: string }[] = [
   { type: 'TRANSFER', label: 'Send' },
@@ -84,6 +84,11 @@ const TABS: { type: TxnType; label: string }[] = [
             <p class="muted small">Bank transfer is simulated in this demo.</p>
           }
           @if (error()) { <p class="error">{{ error() }}</p> }
+          @if (stepUpNeeded()) {
+            <label>Authenticator code
+              <input name="stepUpCode" [(ngModel)]="stepUpCode" required autocomplete="one-time-code" maxlength="19" />
+            </label>
+          }
           <button class="primary" [disabled]="busy() || f.invalid || (type() === 'TRANSFER' && !receiver())">
             {{ busy() ? 'Please wait…' : submitLabel() }}
           </button>
@@ -144,10 +149,19 @@ export class PayPage implements OnInit {
    */
   private idempotencyKey = crypto.randomUUID();
 
+  /** A large payment asked for the authenticator code (step-up); the retry keeps the same idempotency key. */
+  stepUpNeeded = signal(false);
+  stepUpCode = '';
+
   async pay() {
     this.busy.set(true);
     this.error.set('');
     try {
+      if (this.stepUpNeeded()) {
+        await this.api.stepUp(this.stepUpCode);
+        this.stepUpNeeded.set(false);
+        this.stepUpCode = '';
+      }
       const body: Record<string, unknown> = { type: this.type(), amount: this.amount };
       if (this.type() === 'TRANSFER') Object.assign(body, { receiverId: this.receiver()!.userId, remark: this.remark || null });
       if (this.type() === 'BILL_PAYMENT') Object.assign(body, { billCategory: this.billCategory, billAccount: this.billAccount });
@@ -157,7 +171,11 @@ export class PayPage implements OnInit {
         txn = await this.api.createTxn(body, this.idempotencyKey);
         this.idempotencyKey = crypto.randomUUID();
       } catch (e) {
-        if (e instanceof HttpErrorResponse && e.status >= 400 && e.status < 500) this.idempotencyKey = crypto.randomUUID();
+        if (isProblem(e, 'step-up-required')) {
+          this.stepUpNeeded.set(true); // same attempt once the code is in: keep the key
+        } else if (e instanceof HttpErrorResponse && e.status >= 400 && e.status < 500) {
+          this.idempotencyKey = crypto.randomUUID();
+        }
         throw e;
       }
       this.result.set(txn);

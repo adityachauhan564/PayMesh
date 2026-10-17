@@ -88,7 +88,7 @@ public class RefreshTokens {
         return raw;
     }
 
-    static String hash(String raw) {
+    public static String hash(String raw) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(raw.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException e) {

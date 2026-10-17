@@ -90,6 +90,23 @@ public class UserController {
                 .sameSite("Strict").path("/api/auth").maxAge(maxAge).build().toString();
     }
 
+    public record UnlockRequest(@jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 64) String token) {
+    }
+
+    /** The token from the lockout email's link, posted by the web app's /unlock page. */
+    @PostMapping("/auth/unlock")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void unlock(@RequestBody @Valid UnlockRequest request) {
+        if (!userOperationsService.unlock(request.token())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This unlock link is invalid, already used or expired");
+        }
+    }
+
+    @PostMapping("/users/me/step-up")
+    public AuthResponse stepUp(@AuthenticationPrincipal Jwt jwt, @RequestBody @Valid com.paymesh.auth.TwoFactorController.CodeRequest request) {
+        return userOperationsService.stepUp(Long.parseLong(jwt.getSubject()), request.code());
+    }
+
     @GetMapping("/users/me")
     public UserResponse me(@AuthenticationPrincipal Jwt jwt) {
         return UserResponse.of(userOperationsService.getUser(Long.valueOf(jwt.getSubject())));

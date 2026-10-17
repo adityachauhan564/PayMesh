@@ -5,9 +5,11 @@ import { DashboardPage } from './pages/dashboard';
 import { PayPage } from './pages/pay';
 import { HistoryPage } from './pages/history';
 import { ProfilePage } from './pages/profile';
+import { UnlockPage } from './pages/unlock';
 
 export const routes: Routes = [
   { path: 'login', component: AuthPage, title: 'Login · PayMesh' },
+  { path: 'unlock', component: UnlockPage, title: 'Unlock · PayMesh' },
   {
     path: '',
     canActivate: [authGuard],

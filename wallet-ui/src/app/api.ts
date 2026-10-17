@@ -11,6 +11,7 @@ export interface User {
   address?: string;
   pan?: string;
   createdDate: string;
+  twoFactorEnabled?: boolean;
 }
 
 export interface Wallet {
@@ -68,8 +69,31 @@ export class Api {
 
   private refreshing: Promise<Session | null> | null = null;
 
-  login(username: string, password: string) {
-    return this.startSession(this.http.post<Session>('/api/auth/login', { username, password }));
+  /** otp only when the server asked for it (isProblem(e, 'mfa-required')). */
+  login(username: string, password: string, otp?: string) {
+    return this.startSession(this.http.post<Session>('/api/auth/login', otp ? { username, password, otp } : { username, password }));
+  }
+
+  /** Enters the authenticator code again; the new token satisfies large-payment step-up for 5 minutes. */
+  async stepUp(code: string) {
+    this.session.set(await firstValueFrom(this.http.post<Session>('/api/users/me/step-up', { code })));
+  }
+
+  /** The token from the lockout email's link. */
+  unlock(token: string) {
+    return firstValueFrom(this.http.post('/api/auth/unlock', { token }));
+  }
+
+  setup2fa(password: string) {
+    return firstValueFrom(this.http.post<{ secret: string; otpauthUri: string }>('/api/users/me/2fa/setup', { password }));
+  }
+
+  enable2fa(code: string) {
+    return firstValueFrom(this.http.post<{ recoveryCodes: string[] }>('/api/users/me/2fa/enable', { code }));
+  }
+
+  disable2fa(password: string, code: string) {
+    return firstValueFrom(this.http.post('/api/users/me/2fa/disable', { password, code }));
   }
 
   register(body: object) {
@@ -181,6 +205,11 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
 };
 
 export const authGuard: CanActivateFn = () => !!inject(Api).session() || inject(Router).createUrlTree(['/login']);
+
+/** Whether the error is the ProblemDetail of that kind (its type URI ends with the name). */
+export function isProblem(e: unknown, kind: 'mfa-required' | 'step-up-required'): boolean {
+  return e instanceof HttpErrorResponse && typeof e.error?.type === 'string' && e.error.type.endsWith('/' + kind);
+}
 
 /** Backend errors are ProblemDetails; show their detail. */
 export function errorMessage(e: unknown): string {

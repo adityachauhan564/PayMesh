@@ -41,6 +41,22 @@ public class User {
     @Column(nullable = false, length = 16)
     private String role = "USER";
 
+    /** Base32 TOTP secret; set at setup, active once totpEnabled. */
+    @Column(length = 64)
+    private String totpSecret;
+
+    @Column(nullable = false)
+    private boolean totpEnabled;
+
+    /** Last TOTP time step accepted: a code is valid for ~90 s and must not work twice. */
+    private Long totpLastStep;
+
+    /** SHA-256 of the one-time unlock link sent with the lockout email. */
+    @Column(length = 64, columnDefinition = "char(64)")
+    private String unlockTokenHash;
+
+    private Instant unlockExpiresAt;
+
     @CreationTimestamp
     private LocalDateTime createdDate;
 
@@ -74,6 +90,13 @@ public class User {
         lockedUntil = now.plus(lockDuration);
         failedLoginAttempts = 0; // a full set of attempts once the lock expires
         return true;
+    }
+
+    /** The owner proved access to their email (unlock link): the lock and the link are both cleared. */
+    public void unlock() {
+        recordSuccessfulLogin();
+        unlockTokenHash = null;
+        unlockExpiresAt = null;
     }
 
     public void recordSuccessfulLogin() {
