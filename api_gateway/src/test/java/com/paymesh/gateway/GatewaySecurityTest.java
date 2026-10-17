@@ -90,7 +90,8 @@ class GatewaySecurityTest extends GatewayTestSupport {
 
     @Test
     void unlockLinkFromTheEmailIsPublic() throws InterruptedException {
-        client.get().uri("/api/auth/unlock?token=abc").exchange().expectStatus().isOk();
+        client.post().uri("/api/auth/unlock").contentType(MediaType.APPLICATION_JSON).bodyValue("{\"token\":\"abc\"}").exchange()
+                .expectStatus().isOk();
 
         assertThat(USER_SERVICE.takeRequest()).isNotNull();
     }

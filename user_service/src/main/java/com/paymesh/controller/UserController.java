@@ -42,9 +42,6 @@ public class UserController {
     @Autowired
     private AuthProperties authProperties;
 
-    @org.springframework.beans.factory.annotation.Value("${app.public-url:http://localhost:4200}")
-    private String publicUrl;
-
     @PostMapping("/auth/register")
     public ResponseEntity<AuthResponse> register(@RequestBody @Valid RegisterRequest request) {
         return withNewSession(HttpStatus.CREATED, userOperationsService.register(request));
@@ -93,11 +90,16 @@ public class UserController {
                 .sameSite("Strict").path("/api/auth").maxAge(maxAge).build().toString();
     }
 
-    /** From the lockout email: unlocks the account and sends the browser to the login page. */
-    @GetMapping("/auth/unlock")
-    public ResponseEntity<Void> unlock(@RequestParam(required = false) String token) {
-        String result = userOperationsService.unlock(token) ? "unlocked=1" : "unlock=invalid";
-        return ResponseEntity.status(HttpStatus.FOUND).header(HttpHeaders.LOCATION, publicUrl + "/login?" + result).build();
+    public record UnlockRequest(@jakarta.validation.constraints.NotBlank @jakarta.validation.constraints.Size(max = 64) String token) {
+    }
+
+    /** The token from the lockout email's link, posted by the web app's /unlock page. */
+    @PostMapping("/auth/unlock")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void unlock(@RequestBody @Valid UnlockRequest request) {
+        if (!userOperationsService.unlock(request.token())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "This unlock link is invalid, already used or expired");
+        }
     }
 
     @PostMapping("/users/me/step-up")

@@ -35,8 +35,8 @@ import reactor.core.publisher.Mono;
 @EnableConfigurationProperties(JwtProperties.class)
 public class GatewaySecurityConfig {
 
-    private static final String[] PUBLIC_POST_PATHS = {"/api/auth/register", "/api/auth/login", "/api/auth/refresh", "/api/auth/logout"};
-    private static final String[] PUBLIC_GET_PATHS = {"/actuator/health", "/actuator/health/**", "/api/auth/unlock"};
+    private static final String[] PUBLIC_POST_PATHS = {"/api/auth/register", "/api/auth/login", "/api/auth/refresh", "/api/auth/logout", "/api/auth/unlock"};
+    private static final String[] PUBLIC_GET_PATHS = {"/actuator/health", "/actuator/health/**"};
 
     @Bean
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http,

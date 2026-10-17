@@ -50,7 +50,8 @@ public class LockoutNotifier {
         user.setUnlockTokenHash(RefreshTokens.hash(token));
         user.setUnlockExpiresAt(user.getLockedUntil().isBefore(Instant.now().plus(UNLOCK_LINK_VALIDITY))
                 ? user.getLockedUntil() : Instant.now().plus(UNLOCK_LINK_VALIDITY));
-        String link = publicUrl + "/api/auth/unlock?token=" + token;
+        // A page of the web app, which POSTs the token: link scanners that open URLs in emails must not unlock
+        String link = publicUrl + "/unlock?token=" + token;
         SendMailNotification mail = new SendMailNotification(user.getUserEmailId(),
                 "PayMesh: your account was temporarily locked", body(user, failedAttempts, link));
         outbox.publish(TopicConstants.SEND_NOTIFICATION_TOPIC, mail.receiverMailId(), mail);

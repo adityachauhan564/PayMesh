@@ -141,7 +141,7 @@ class LoginLockoutIntegrationTest {
         assertThat(login("wrong-3").statusCode()).isEqualTo(429);
     }
 
-    /** The link in the most recent lockout email this user was sent (via the outbox relay). */
+    /** The token from the link in the most recent lockout email this user was sent (via the outbox relay). */
     @SuppressWarnings("unchecked")
     private String latestUnlockLink() {
         org.mockito.ArgumentCaptor<ProducerRecord<String, String>> sent = org.mockito.ArgumentCaptor.forClass(ProducerRecord.class);
@@ -150,15 +150,18 @@ class LoginLockoutIntegrationTest {
         verify(kafkaTemplate, atLeastOnce()).send(sent.capture());
         String body = sent.getAllValues().stream().filter(r -> (mobile + "@example.com").equals(r.key()))
                 .reduce((first, second) -> second).orElseThrow().value();
-        java.util.regex.Matcher link = java.util.regex.Pattern.compile("(http://localhost:4200/api/auth/unlock\\?token=[A-Za-z0-9_-]+)").matcher(body);
+        java.util.regex.Matcher link = java.util.regex.Pattern.compile("http://localhost:4200/unlock\\?token=([A-Za-z0-9_-]+)").matcher(body);
         assertThat(link.find()).as("lockout email contains an unlock link: %s", body).isTrue();
         return link.group(1);
     }
 
-    private HttpResponse<String> open(String link) {
+    /** What the web app's /unlock page does with the token from the link: a POST (opening the link changes nothing). */
+    private int unlock(String token) {
         try {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(link.replace("http://localhost:4200", "http://localhost:" + port))).GET().build();
-            return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString()); // does not follow redirects
+            HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/auth/unlock"))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString("{\"token\":\"" + token + "\"}")).build();
+            return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString()).statusCode();
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
@@ -167,14 +170,11 @@ class LoginLockoutIntegrationTest {
     @Test
     void unlockLinkUnlocksOnce() {
         lockAccount();
-        String link = latestUnlockLink();
+        String token = latestUnlockLink();
 
-        HttpResponse<String> unlocked = open(link);
-
-        assertThat(unlocked.statusCode()).isEqualTo(302);
-        assertThat(unlocked.headers().firstValue("Location")).hasValue("http://localhost:4200/login?unlocked=1");
+        assertThat(unlock(token)).isEqualTo(204);
         assertThat(login("secret123").statusCode()).isEqualTo(200);
-        assertThat(open(link).headers().firstValue("Location")).hasValue("http://localhost:4200/login?unlock=invalid");
+        assertThat(unlock(token)).isEqualTo(400);
     }
 
     @Test
@@ -188,9 +188,8 @@ class LoginLockoutIntegrationTest {
         lockAccount(); // ...and a new one replaces the first link
         clearInvocations(kafkaTemplate);
 
-        assertThat(open(first).headers().firstValue("Location")).hasValue("http://localhost:4200/login?unlock=invalid");
-        assertThat(open("http://localhost:4200/api/auth/unlock?token=made-up").headers().firstValue("Location"))
-                .hasValue("http://localhost:4200/login?unlock=invalid");
+        assertThat(unlock(first)).isEqualTo(400);
+        assertThat(unlock("made-up")).isEqualTo(400);
         assertThat(login("secret123").statusCode()).as("still locked").isEqualTo(429);
     }
 }
