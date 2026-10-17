@@ -12,7 +12,7 @@ RUN --mount=type=cache,target=/root/.m2,sharing=locked \
  && mvn -B -q -pl "$SERVICE" -am package -DskipTests \
  && cp "$SERVICE"/target/"$SERVICE"-*-SNAPSHOT.jar /app.jar
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:24-jre
 RUN useradd --system --uid 10001 paymesh
 USER paymesh
 WORKDIR /app
