@@ -1,5 +1,7 @@
 package com.paymesh.outbox;
 
+import com.paymesh.logging.CorrelationIdLoggingFilter;
+import org.slf4j.MDC;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 import org.springframework.transaction.annotation.Propagation;
@@ -27,7 +29,13 @@ public class Outbox {
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public void publish(String topic, String key, Object payload) {
-        repository.save(new OutboxEvent(producer, topic, key, toJson(payload)));
+        publishJson(topic, key, toJson(payload));
+    }
+
+    /** For payloads that already are JSON (e.g. replaying a dead letter): stored as is, not re-encoded. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void publishJson(String topic, String key, String json) {
+        repository.save(new OutboxEvent(producer, topic, key, json, MDC.get(CorrelationIdLoggingFilter.MDC_KEY)));
     }
 
     private String toJson(Object payload) {

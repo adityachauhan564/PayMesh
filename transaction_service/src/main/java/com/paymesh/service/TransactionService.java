@@ -71,8 +71,14 @@ public class TransactionService {
         return saved;
     }
 
+    /** Kafka may redeliver a result, or deliver a stale one late: only a PENDING payment takes a result. */
+    @Transactional
     public void updateTransactionStatus(TransactionResultDto result) {
         transactionRepository.findById(result.transactionId()).ifPresentOrElse(txn -> {
+            if (txn.getStatus().isFinal()) {
+                log.info("Ignoring result {} for transaction {}: already {}", result.paymentStatus(), txn.getTransactionId(), txn.getStatus());
+                return;
+            }
             txn.setStatus(result.paymentStatus());
             txn.setFailureReason(result.reason());
             if (result.fromName() != null) {

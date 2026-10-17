@@ -1,5 +1,6 @@
 package com.paymesh;
 
+import org.apache.kafka.clients.producer.ProducerRecord;
 import com.paymesh.constants.TopicConstants;
 import com.paymesh.model.User;
 import com.paymesh.repository.UserRepository;
@@ -28,8 +29,8 @@ import java.util.concurrent.Executors;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
 /**
@@ -69,7 +70,7 @@ class LoginLockoutIntegrationTest {
         user.setUserEmailId(mobile + "@example.com");
         user.setPasswordHash(passwordEncoder.encode("secret123"));
         userRepository.save(user);
-        when(kafkaTemplate.send(anyString(), anyString(), anyString())).thenReturn(CompletableFuture.completedFuture(null));
+        when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(CompletableFuture.completedFuture(null));
     }
 
     @Test
@@ -109,10 +110,14 @@ class LoginLockoutIntegrationTest {
         assertThat(stored.isLockedAt(Instant.now())).isTrue();
         assertThat(login("secret123").statusCode()).isEqualTo(429);
         // Goes out via the outbox relay (polls every 250 ms): wait for it, then make sure no second one follows.
-        verify(kafkaTemplate, timeout(5000).times(1))
-                .send(eq(TopicConstants.SEND_NOTIFICATION_TOPIC), eq(mobile + "@example.com"), anyString());
+        verify(kafkaTemplate, timeout(5000).times(1)).send(lockoutMail());
         verify(kafkaTemplate, after(1000).times(1).description("one lock, one email, despite 12 parallel guesses"))
-                .send(eq(TopicConstants.SEND_NOTIFICATION_TOPIC), eq(mobile + "@example.com"), anyString());
+                .send(lockoutMail());
+    }
+
+    private ProducerRecord<String, String> lockoutMail() {
+        return argThat(r -> r != null && TopicConstants.SEND_NOTIFICATION_TOPIC.equals(r.topic())
+                && (mobile + "@example.com").equals(r.key()));
     }
 
     // JDK client: HttpURLConnection (TestRestTemplate's default) can't read a 401 carrying WWW-Authenticate.
