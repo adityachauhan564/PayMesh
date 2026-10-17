@@ -102,6 +102,22 @@ describe('Api session', () => {
     expect(api.session()).toBeNull();
   });
 
+  it('refreshes under a cross-tab lock so tabs sharing the cookie take turns', async () => {
+    const { api, backend } = setup(false);
+    const request = vi.fn((_name: string, callback: () => Promise<unknown>) => callback());
+    vi.stubGlobal('navigator', { ...navigator, locks: { request } });
+    try {
+      const restored = api.restore();
+      await settle();
+      backend.expectOne('/api/auth/refresh').flush({ token: 't9', user: USER });
+      await restored;
+      expect(request).toHaveBeenCalledWith('paymesh-refresh', expect.any(Function));
+      expect(api.session()?.token).toBe('t9');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('keeps the session out of localStorage', async () => {
     const { api, backend } = setup(false);
     const login = api.login('9000000001', 'secret123');

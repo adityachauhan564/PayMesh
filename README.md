@@ -689,7 +689,7 @@ java -jar notification_service/target/notification_service-0.0.1-SNAPSHOT.jar --
 java -jar api_gateway/target/api_gateway-0.0.1-SNAPSHOT.jar                   --spring.profiles.active=local
 ```
 
-Start user_service first: the other services fetch its public signing keys from `http://localhost:8081/.well-known/jwks.json` on their first request (`JWT_JWKS_URI`). Without `JWT_PRIVATE_KEY`, user_service generates a key per start, so restarting it logs everyone out.
+Start user_service first: the other services fetch its public signing keys from `http://localhost:8081/.well-known/jwks.json` on their first request (`JWT_JWKS_URI`). Without `JWT_PRIVATE_KEY`, user_service generates a new key per start: access tokens from before the restart stop verifying, and the web app quietly gets a new one through its refresh cookie (refresh tokens are database rows, so sessions survive).
 
 #### 3. Start the web app
 
@@ -799,7 +799,7 @@ paymesh/
 | **Wallet service decides, not transaction service** | The balance check and the debit happen in *one* transaction under row locks. Checking in one service and debiting in another allowed double spending in the original design. |
 | **Transactional outbox** | DB-then-Kafka loses events on crashes and outages; the outbox makes events part of the commit |
 | **JWT validated at gateway *and* services** | Defence in depth: bypassing the gateway grants nothing; services never trust headers |
-| **RS256 + JWKS instead of a shared secret** | Only user_service can mint tokens; a compromised gateway or service can't forge identities; keys rotate by publishing a new `kid` |
+| **RS256 + JWKS instead of a shared secret** | Only user_service can mint tokens; a compromised gateway or service can't forge identities; a new key gets a new `kid`, and verifiers refetch the JWKS when they see one (only one key is published at a time, so tokens signed by the old key stop verifying and are silently refreshed) |
 | **Short access token + rotating refresh cookie** | A stolen access token is useful for 15 minutes; the refresh token is out of JavaScript's reach (HttpOnly) and a copied one is detected on reuse |
 | **Schema per service, Flyway migrations, `ddl-auto=validate`** | Services can't couple through tables; every schema change is reviewed SQL with a history; a drifted schema fails fast at startup |
 | **Double-entry ledger plus a cached balance** | Reads stay O(1); every rupee is explained by balanced postings, and a nightly reconciliation proves cache and ledger agree |
@@ -828,7 +828,7 @@ paymesh/
 
 | Symptom | Cause and fix |
 |---|---|
-| Every request is `401` right after restarting user_service | Without `JWT_PRIVATE_KEY` it generated a new signing key: log in again (or set `JWT_PRIVATE_KEY` so sessions survive restarts) |
+| API calls (curl, Postman) are `401` right after restarting user_service | Without `JWT_PRIVATE_KEY` it generated a new signing key, so older access tokens no longer verify. The web app refreshes automatically; for curl, log in again or call `/api/auth/refresh` (set `JWT_PRIVATE_KEY` to keep one key across restarts) |
 | `Access denied for user 'user_svc'` (or `wallet_svc`, `txn_svc`) or `Unknown database 'user_db'` after upgrading | Your `mysql-data` volume predates the per-service schemas, and init scripts only run on a new volume. `docker compose down -v` (this **wipes local data**), then start again |
 | `Access denied for user '...'@'localhost'` from the IDE | Your MySQL has different credentials: set `DB_USERNAME` / `DB_PASSWORD` (and `DB_URL` if not on 3306) |
 | Wallet says *"being created"* for a long time | Kafka or wallet_service isn't running. Nothing is lost: pending events sit in `outbox_event` and go out once both are up |

@@ -20,7 +20,7 @@ import java.util.Base64;
 /**
  * The only private key in PayMesh. Tokens are signed with it; everyone else verifies against the public half,
  * published as JWKS. Configured as PKCS#8 PEM (JWT_PRIVATE_KEY); without one, a fresh key is generated per start,
- * which is fine for development but logs everyone out on every restart.
+ * which is fine for development: older access tokens stop verifying after a restart and clients refresh them.
  */
 @Component
 @Slf4j
@@ -41,7 +41,7 @@ public class JwtKeys {
     }
 
     private static RSAKey generate() {
-        log.warn("JWT_PRIVATE_KEY not set: generated a signing key for this run only; sessions won't survive a restart");
+        log.warn("JWT_PRIVATE_KEY not set: generated a signing key for this run only; access tokens from before a restart won't verify");
         try {
             RSAKey key = new RSAKeyGenerator(2048).keyUse(KeyUse.SIGNATURE).generate();
             return withThumbprintKid(key);

@@ -108,18 +108,6 @@ class RefreshFlowIntegrationTest {
     }
 
     @Test
-    void reusedRefreshTokenRevokesTheFamily() throws Exception {
-        String a = register().refreshCookie();
-        String b = cookieValue(post("/api/auth/refresh", null, a, null));
-
-        HttpResponse<String> replay = post("/api/auth/refresh", null, a, null); // the thief, or a stale tab
-
-        assertThat(replay.statusCode()).isEqualTo(401);
-        assertThat(setCookie(replay)).contains("Max-Age=0");
-        assertThat(post("/api/auth/refresh", null, b, null).statusCode()).isEqualTo(401);
-    }
-
-    @Test
     void expiredRefreshTokenIs401() throws Exception {
         String cookie = register().refreshCookie();
         jdbc.update("UPDATE refresh_token SET expires_at = NOW(6) - INTERVAL 1 DAY");
@@ -162,5 +150,32 @@ class RefreshFlowIntegrationTest {
                 + "(SELECT family_id FROM (SELECT family_id FROM refresh_token WHERE token_hash = SHA2(?, 256)) f) "
                 + "AND used_at IS NULL AND revoked_at IS NULL", Long.class, a);
         assertThat(live).containsExactly(1L);
+    }
+
+    /** Two tabs refreshing at the same moment share one cookie: the slower one must not log both out. */
+    @Test
+    void secondTabRefreshingAtTheSameMomentDoesNotRevokeTheSession() throws Exception {
+        String shared = register().refreshCookie();
+
+        HttpResponse<String> first = post("/api/auth/refresh", null, shared, null);
+        HttpResponse<String> second = post("/api/auth/refresh", null, shared, null); // same cookie, a moment later
+
+        assertThat(first.statusCode()).isEqualTo(200);
+        assertThat(second.statusCode()).isEqualTo(401);
+        assertThat(post("/api/auth/refresh", null, cookieValue(first), null).statusCode()).isEqualTo(200); // session survives
+    }
+
+    /** A used token presented again later is a copy (theft): the whole family goes, the real holder included. */
+    @Test
+    void reusedRefreshTokenRevokesTheFamily() throws Exception {
+        String a = register().refreshCookie();
+        String b = cookieValue(post("/api/auth/refresh", null, a, null));
+        jdbc.update("UPDATE refresh_token SET used_at = used_at - INTERVAL 1 MINUTE WHERE token_hash = SHA2(?, 256)", a);
+
+        HttpResponse<String> replay = post("/api/auth/refresh", null, a, null);
+
+        assertThat(replay.statusCode()).isEqualTo(401);
+        assertThat(setCookie(replay)).contains("Max-Age=0");
+        assertThat(post("/api/auth/refresh", null, b, null).statusCode()).isEqualTo(401);
     }
 }

@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
@@ -28,6 +29,12 @@ public class RefreshTokens {
     }
 
     private static final SecureRandom RANDOM = new SecureRandom();
+
+    /**
+     * Two tabs share one cookie and may refresh at the same moment: the slower one presents the token the faster one
+     * just used. Within this window that's a race, not theft: refused, but the session is not revoked.
+     */
+    static final Duration REUSE_GRACE = Duration.ofSeconds(10);
 
     private final RefreshTokenRepository repository;
     private final AuthProperties auth;
@@ -51,6 +58,9 @@ public class RefreshTokens {
         RefreshToken token = repository.findLockedByHash(hash(rawToken)).orElseThrow(RefreshTokens::unauthorized);
         Instant now = Instant.now();
         if (token.getRevokedAt() != null || token.getExpiresAt().isBefore(now)) {
+            throw unauthorized();
+        }
+        if (token.getUsedAt() != null && token.getUsedAt().isAfter(now.minus(REUSE_GRACE))) {
             throw unauthorized();
         }
         if (token.getUsedAt() != null) {

@@ -81,9 +81,14 @@ export class Api {
     await this.refresh();
   }
 
-  /** One refresh at a time: concurrent 401s share it. Resolves to null when the session is gone. */
+  /**
+   * One refresh at a time: concurrent 401s in this tab share it, and a Web Lock makes other tabs (which share the
+   * refresh cookie) wait their turn, so each sends the cookie the previous one rotated. Null when the session is gone.
+   */
   refresh(): Promise<Session | null> {
-    this.refreshing ??= firstValueFrom(this.http.post<Session>('/api/auth/refresh', {}))
+    const call = () => firstValueFrom(this.http.post<Session>('/api/auth/refresh', {}));
+    const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
+    this.refreshing ??= (locks ? locks.request('paymesh-refresh', call).then((s) => s) : call())
       .then((s) => {
         this.session.set(s);
         return s;
