@@ -8,6 +8,7 @@ import com.paymesh.enums.PaymentStatus;
 import com.paymesh.repository.TransactionRepository;
 import com.paymesh.security.SecurityConfig;
 import com.paymesh.service.TransactionService;
+import com.paymesh.idempotency.IdempotentPayments;
 import com.paymesh.enums.TransactionType;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -42,6 +43,8 @@ class TransactionControllerTest {
     private TransactionRepository transactionRepository;
     @MockitoBean
     private Outbox outbox;
+    @MockitoBean
+    private IdempotentPayments idempotentPayments; // covered by IdempotencyIntegrationTest
 
     @Test
     void transactionDetailsAreHiddenFromNonParticipants() throws Exception {
