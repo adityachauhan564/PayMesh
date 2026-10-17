@@ -7,6 +7,7 @@ import com.paymesh.dto.InitiateTransactionDto;
 import com.paymesh.dto.TransactionResultDto;
 import com.paymesh.entity.Transaction;
 import com.paymesh.outbox.Outbox;
+import io.micrometer.core.instrument.MeterRegistry;
 import com.paymesh.enums.PaymentStatus;
 import com.paymesh.enums.TransactionType;
 import com.paymesh.repository.TransactionRepository;
@@ -29,6 +30,9 @@ public class TransactionService {
 
     @Autowired
     private Outbox outbox;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     /** The payment and its event are committed together, so a PENDING payment always reaches the wallet. */
     @Transactional
@@ -82,6 +86,7 @@ public class TransactionService {
                 return;
             }
             txn.setStatus(result.paymentStatus());
+            recordCompletion(txn);
             txn.setFailureReason(result.reason());
             if (result.fromName() != null) {
                 txn.setSenderName(result.fromName());
@@ -102,6 +107,15 @@ public class TransactionService {
     public List<Transaction> getHistory(Long userId, int page, int size) {
         return transactionRepository.findBySenderIdOrReceiverIdOrderByPaymentInitiationDateDesc(userId, userId,
                 PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)));
+    }
+
+    /** Low-cardinality tags only (status, type): never ids or amounts. */
+    private void recordCompletion(Transaction txn) {
+        meterRegistry.counter("paymesh.payments.completed", "status", txn.getStatus().name(), "type", txn.getType().name()).increment();
+        if (txn.getPaymentInitiationDate() != null) {
+            meterRegistry.timer("paymesh.payments.duration", "status", txn.getStatus().name())
+                    .record(java.time.Duration.between(txn.getPaymentInitiationDate(), java.time.LocalDateTime.now()));
+        }
     }
 
     private static ResponseStatusException badRequest(String message) {

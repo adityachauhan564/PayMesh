@@ -47,6 +47,8 @@ class DeadLetterStoreIntegrationTest {
     private DeadLetterRepository deadLetters;
     @Autowired
     private OutboxEventRepository outbox;
+    @Autowired
+    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     @BeforeEach
     void empty() {
@@ -75,6 +77,15 @@ class DeadLetterStoreIntegrationTest {
             assertThat(d.getExceptionMessage()).isEqualTo("boom");
             assertThat(d.getStatus()).isEqualTo(DeadLetter.Status.NEW);
         });
+    }
+
+    @Test
+    void newDeadLettersAreAGauge() {
+        store.record(dlt(1));
+        store.record(dlt(2));
+        store.discard(deadLetters.findAll().getFirst().getId());
+
+        assertThat(meterRegistry.get("paymesh.deadletters.new").gauge().value()).isEqualTo(1.0);
     }
 
     @Test

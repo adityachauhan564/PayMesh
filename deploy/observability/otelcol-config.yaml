@@ -1,0 +1,85 @@
+# grafana/otel-lgtm's collector config (v0.35.0) plus one step: transform/scrub masks email addresses and Indian
+# mobile numbers in every log line and log/span attribute BEFORE anything is stored. The logs and traces are
+# shown to strangers on the public demo, so personal data must never reach Loki or Tempo.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  prometheus/collector:
+    config:
+      scrape_configs:
+        - job_name: "opentelemetry-collector"
+          scrape_interval: 15s
+          static_configs:
+            - targets: ["127.0.0.1:8888"]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/ready"
+
+processors:
+  batch:
+  # Patterns avoid backslashes (OTTL strings don't take them): [.] is a literal dot. The mobile pattern keeps its
+  # neighbours ($${1}, $${3}; $$ escapes the collector's env expansion) so a 10-digit run inside a longer number
+  # (timestamps, ids) is left alone; it also takes a +91/91/0 prefix, and runs twice because each match consumes the
+  # character after it (back-to-back numbers). Span events hold exception messages, e.g. a duplicate-key error that
+  # quotes an email, so they are scrubbed too.
+  transform/scrub:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - replace_pattern(body, "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}", "***@***")
+          - replace_pattern(body, "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_pattern(body, "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}", "***@***")
+          - replace_all_patterns(attributes, "value", "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_all_patterns(attributes, "value", "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+    trace_statements:
+      - context: span
+        statements:
+          - replace_pattern(name, "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}", "***@***")
+          - replace_pattern(name, "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_pattern(name, "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}", "***@***")
+          - replace_all_patterns(attributes, "value", "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_all_patterns(attributes, "value", "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+      - context: spanevent
+        statements:
+          - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}", "***@***")
+          - replace_all_patterns(attributes, "value", "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_all_patterns(attributes, "value", "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+
+exporters:
+  otlp_http/metrics:
+    endpoint: http://127.0.0.1:9090/api/v1/otlp
+    tls:
+      insecure: true
+  otlp_http/traces:
+    endpoint: http://127.0.0.1:4418
+    tls:
+      insecure: true
+  otlp_http/logs:
+    endpoint: http://127.0.0.1:3100/otlp
+    tls:
+      insecure: true
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [transform/scrub, batch]
+      exporters: [otlp_http/traces]
+    metrics:
+      receivers: [otlp, prometheus/collector]
+      processors: [batch]
+      exporters: [otlp_http/metrics]
+    logs:
+      receivers: [otlp]
+      processors: [transform/scrub, batch]
+      exporters: [otlp_http/logs]

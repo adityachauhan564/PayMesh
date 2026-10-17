@@ -8,6 +8,8 @@ import java.util.List;
 
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> {
 
+    long countByProducer(String producer);
+
     /**
      * Oldest first, row-locked: a second instance of the same service waits instead of publishing the same
      * events concurrently, which also keeps them in order.

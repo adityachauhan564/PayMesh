@@ -53,6 +53,8 @@ class LedgerIntegrationTest {
     private JdbcTemplate jdbc;
     @Autowired
     private ReconciliationService reconciliation;
+    @Autowired
+    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     @BeforeEach
     void wallets() {
@@ -158,6 +160,8 @@ class LedgerIntegrationTest {
         try {
             ReconciliationReport report = reconciliation.reconcile();
 
+            reconciliation.reconcile(); // any reconciliation (not only the nightly one) keeps the gauge current
+            assertThat(meterRegistry.get("paymesh.ledger.mismatches").gauge().value()).isEqualTo(1.0);
             assertThat(report.mismatches()).singleElement().satisfies(m -> {
                 assertThat(m.userId()).isEqualTo(3L);
                 assertThat(m.walletBalance().subtract(m.ledgerBalance())).isEqualByComparingTo("1.00");
@@ -165,5 +169,7 @@ class LedgerIntegrationTest {
         } finally {
             jdbc.update("UPDATE wallet SET balance = balance - 1 WHERE user_id = 3");
         }
+        reconciliation.reconcile();
+        assertThat(meterRegistry.get("paymesh.ledger.mismatches").gauge().value()).isZero();
     }
 }

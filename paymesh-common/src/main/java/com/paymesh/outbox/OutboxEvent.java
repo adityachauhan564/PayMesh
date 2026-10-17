@@ -49,6 +49,10 @@ public class OutboxEvent {
     @Column(name = "correlation_id", length = 64)
     private String correlationId;
 
+    /** W3C traceparent of the trace that wrote the event (see OutboxTracing); null outside any trace. */
+    @Column(length = 64)
+    String traceparent;
+
     OutboxEvent(String producer, String topic, String messageKey, String payload, String correlationId) {
         this.producer = producer;
         this.topic = topic;

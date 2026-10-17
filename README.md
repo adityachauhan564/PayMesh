@@ -25,17 +25,18 @@ Users can register, add money, send money to other users by mobile number, pay b
 5. [Core flows](#core-flows): registration, payments, login
 6. [Reliability: the transactional outbox](#reliability-the-transactional-outbox)
 7. [Double-entry ledger](#double-entry-ledger)
-8. [Data model](#data-model)
-9. [Kafka event catalogue](#kafka-event-catalogue)
-10. [Security model](#security-model)
-11. [API reference](#api-reference)
-12. [Getting started](#getting-started)
-13. [Configuration](#configuration)
-14. [Testing](#testing)
-15. [Project structure](#project-structure)
-16. [Design decisions](#design-decisions)
-17. [Known limitations and roadmap](#known-limitations-and-roadmap)
-18. [Troubleshooting](#troubleshooting)
+8. [Observability](#observability)
+9. [Data model](#data-model)
+10. [Kafka event catalogue](#kafka-event-catalogue)
+11. [Security model](#security-model)
+12. [API reference](#api-reference)
+13. [Getting started](#getting-started)
+14. [Configuration](#configuration)
+15. [Testing](#testing)
+16. [Project structure](#project-structure)
+17. [Design decisions](#design-decisions)
+18. [Known limitations and roadmap](#known-limitations-and-roadmap)
+19. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -370,6 +371,43 @@ A balance column says *what* a wallet holds, never *why*. Every successful payme
 - **Exactly once:** rejected payments post nothing; `journal_entry.transaction_id` is unique, behind the existing `wallet_processed_transaction` check.
 - **Opening balances:** the migration that introduced the ledger posted every existing balance against `OPENING_BALANCE`, so history starts consistent. Roll it out with **every wallet_service replica stopped first** (Kubernetes `Recreate`): an old replica still running after the migration would change balances without postings, and reconciliation would flag those wallets from then on.
 - **Reconciliation:** `ReconciliationService` runs nightly (`LEDGER_RECONCILE_CRON`, default 02:30) on **one replica only** (ShedLock row lock, using the database clock). It checks every wallet's cached balance against its postings and that all postings net to zero; a failure is logged at ERROR naming each user and the difference, e.g. `user 3: wallet 101.00, ledger 100.00 (off by 1.00)`.
+
+---
+
+## Observability
+
+Every service sends **traces, logs and metrics** over OpenTelemetry (OTLP) to one collector; in compose that's the `lgtm` container: Grafana with Tempo (traces), Loki (logs) and Prometheus (metrics). Open **http://localhost:3000** (admin / admin).
+
+**One payment, one trace.** A transfer shows up in Tempo as a single trace across every hop, including the two Kafka round trips:
+
+```
+api-gateway  http post
+└─ transaction-service  POST /api/transactions
+   └─ outbox relay INITIATE_TRANSACTION_TOPIC → send
+      └─ wallet-service  INITIATE_TRANSACTION_TOPIC process
+         ├─ outbox relay COMPLETED_TRANSACTION_TOPIC → send
+         │  └─ transaction-service  COMPLETED_TRANSACTION_TOPIC process
+         └─ outbox relay SEND_NOTIFICATION → send
+            └─ notification-service  SEND_NOTIFICATION process
+```
+
+The outbox is what normally breaks a trace: the event is written in the request's transaction but sent later, by another thread. Each outbox row therefore stores the W3C `traceparent` of the request that wrote it, and the relay sends inside a span restored from it (`OutboxTracing`), so the Kafka send, the consumer and everything after join the original trace. Every log line carries the `trace_id` it belongs to, so Loki and Tempo link both ways.
+
+| Metric | What it shows |
+|---|---|
+| `paymesh_payments_completed_total{status,type}` | Payments reaching a final status |
+| `paymesh_payments_duration_milliseconds` (histogram) | Time from creating a payment to its result (the whole saga); the dashboard shows p50/p95/p99 |
+| `paymesh_outbox_backlog` | Events written but not yet on Kafka, per service |
+| `paymesh_deadletters_new` | Messages that failed all retries and wait for replay |
+| `paymesh_ledger_mismatches` | Problems found by the last nightly reconciliation |
+
+Plus HTTP, JVM, and Kafka client metrics (consumer lag included). Tags stay low-cardinality: never user ids, transaction ids or amounts.
+
+**Provisioned as code** (`deploy/observability`): two dashboards (*Payments*; *Messaging & ledger*) and three alert rules: outbox backlog above 100 for 5 minutes, any dead letter waiting, any ledger mismatch.
+
+**Emails and mobile numbers are masked before storage.** The collector's `transform/scrub` step masks email addresses and Indian mobile numbers (with or without `+91`/`0`) in every log line, log and span attribute, span name and span event (exception messages) before anything is written, and notification_service logs a mail it isn't sending with a masked recipient and no body (the full text only at DEBUG). Scheduled pollers and health probes aren't traced, so they don't bury real requests.
+
+Export is off by default (`OTLP_ENABLED=false`), so tests and plain IDE runs don't look for a collector; compose turns it on. Export is batched and asynchronous: with the collector down, requests are unaffected.
 
 ---
 
@@ -742,6 +780,9 @@ All settings come from environment variables with local-friendly defaults.
 | `USER_DB_PASSWORD` / `WALLET_DB_PASSWORD` / `TXN_DB_PASSWORD` | **required** (compose only) | mysql init, services | Passwords for the three service users |
 | `KAFKA_SERVERS` | `localhost:9092` | all services | Kafka bootstrap servers |
 | `IDEMPOTENCY_RETENTION` | `PT24H` | transaction | How long `Idempotency-Key` responses are remembered |
+| `OTLP_ENABLED` | `false` (compose: `true`) | all | Send traces, logs and metrics over OTLP |
+| `OTLP_ENDPOINT` | `http://localhost:4318` | all | The OpenTelemetry collector (compose: `http://lgtm:4318`) |
+| `TRACING_SAMPLING` | `1.0` | all | Share of requests traced (lower it under real load) |
 | `LEDGER_RECONCILE_CRON` | `0 30 2 * * *` (02:30 daily) | wallet | When the ledger reconciliation runs (Spring cron, one replica via ShedLock) |
 | `USER_SERVICE_URL` / `WALLET_SERVICE_URL` / `TRANSACTION_SERVICE_URL` | `http://localhost:8081` / `:8091` / `:8086` | gateway | Route targets |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / none | gateway | Rate-limit store |
@@ -822,6 +863,8 @@ paymesh/
 | **Double-entry ledger plus a cached balance** | Reads stay O(1); every rupee is explained by balanced postings, and a nightly reconciliation proves cache and ledger agree |
 | **Ledger rules as a pure function** | The invariants (balanced, right accounts) are property-tested over thousands of generated payments, independent of Spring and MySQL |
 | **Idempotency key stored in the payment's own transaction** | Key, payment and outbox event commit together; concurrent duplicates serialise on the unique `(user, key)` index and replay the winner's response, with no lock service |
+| **Trace context stored on outbox rows** | Without it every payment would break into separate traces at the outbox; with it, one trace covers request, Kafka hops and consumers |
+| **Scrubbing in the collector, not in each service** | One place masks personal data for every service and signal, including libraries' own log lines |
 | **`BigDecimal` for money** | `double` can't represent ₹0.10 exactly |
 | **ProblemDetail (RFC 7807) everywhere** | One error shape for the UI, from the gateway and every service |
 | **`spring.jpa.open-in-view=false` in user_service** | With it on, the row-locked read returned a stale cached copy and concurrent failed logins overwrote each other's count |

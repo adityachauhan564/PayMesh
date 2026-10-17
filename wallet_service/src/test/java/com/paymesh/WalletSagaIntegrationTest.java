@@ -11,8 +11,11 @@ import com.paymesh.support.MySqlTestContainer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -113,5 +116,37 @@ class WalletSagaIntegrationTest {
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class));
         consumer.subscribe(List.of(topic));
         return consumer;
+    }
+
+    /** One trace from request to result, even though the outbox relay sends the result later from another thread. */
+    @Test
+    void traceContinuesThroughTheOutbox() throws Exception {
+        kafka.send(TopicConstants.USER_CREATION_TOPIC, "303",
+                json.writeValueAsString(new UserWalletCreationRequest(303L, "Ravi", "ravi@example.com"))).get();
+        await().atMost(Duration.ofSeconds(20)).until(() -> wallets.findByUserId(303L).isPresent());
+        String traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+        ProducerRecord<String, String> initiate = new ProducerRecord<>(TopicConstants.INITIATE_TRANSACTION_TOPIC, "t-trace",
+                json.writeValueAsString(new InitiateTransactionDto("t-trace", null, 303L, new BigDecimal("50"), TransactionType.ADD_MONEY)));
+        initiate.headers().add("traceparent", ("00-" + traceId + "-00f067aa0ba902b7-01").getBytes(StandardCharsets.UTF_8));
+        // a plain producer, like an upstream service: the app's KafkaTemplate would start its own trace here
+        try (KafkaProducer<String, String> upstream = new KafkaProducer<>(Map.of(
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers(),
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class))) {
+            upstream.send(initiate).get();
+        }
+
+        List<ConsumerRecord<String, String>> results = new ArrayList<>();
+        try (KafkaConsumer<String, String> consumer = consumer(TopicConstants.COMPLETED_TRANSACTION_TOPIC)) {
+            await().atMost(Duration.ofSeconds(20)).until(() -> {
+                consumer.poll(Duration.ofMillis(500)).forEach(results::add);
+                return results.stream().anyMatch(r -> "t-trace".equals(r.key()));
+            });
+        }
+
+        ConsumerRecord<String, String> completed = results.stream().filter(r -> "t-trace".equals(r.key())).findFirst().orElseThrow();
+        assertThat(completed.headers().lastHeader("traceparent")).as("traceparent on the result").isNotNull();
+        assertThat(new String(completed.headers().lastHeader("traceparent").value(), StandardCharsets.UTF_8))
+                .startsWith("00-" + traceId + "-");
     }
 }
