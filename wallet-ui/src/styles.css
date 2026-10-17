@@ -170,3 +170,6 @@ button.more { width: 100%; margin-top: 8px; }
   .actions { grid-template-columns: repeat(2, 1fr); }
   .topbar nav a:not(.avatar) { padding: 6px; font-size: 0.9rem; }
 }
+
+.notice { background: var(--sky-soft, #e0f2fe); color: var(--navy, #0b2545); padding: 8px 12px; border-radius: 8px; }
+.codes { font-family: ui-monospace, monospace; background: var(--bg-soft, #f1f5f9); padding: 12px; border-radius: 8px; }

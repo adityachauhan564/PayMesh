@@ -34,10 +34,10 @@ public final class UserDtos {
     }
 
     public record UserResponse(Long userId, String fullName, String mobileNo, String emailId, String address,
-                               String pan, LocalDateTime createdDate) {
+                               String pan, LocalDateTime createdDate, boolean twoFactorEnabled) {
         public static UserResponse of(User u) {
             return new UserResponse(u.getUserId(), u.getUserFullName(), u.getUserMobileNo(), u.getUserEmailId(),
-                    u.getUserAddress(), u.getUserPan(), u.getCreatedDate());
+                    u.getUserAddress(), u.getUserPan(), u.getCreatedDate(), u.isTotpEnabled());
         }
     }
 

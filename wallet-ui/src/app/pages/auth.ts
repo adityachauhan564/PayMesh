@@ -1,7 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
-import { Api, errorMessage } from '../api';
+import { ActivatedRoute, Router } from '@angular/router';
+import { Api, errorMessage, isProblem } from '../api';
 
 @Component({
   selector: 'app-auth',
@@ -12,6 +12,7 @@ import { Api, errorMessage } from '../api';
       <p class="muted">Pay anyone, recharge, pay bills. Instantly.</p>
 
       <div class="card">
+        @if (unlocked) { <p class="notice">Your account is unlocked. You can log in now.</p> }
         <div class="tabs">
           <button type="button" [class.active]="mode() === 'login'" (click)="switch('login')">Login</button>
           <button type="button" [class.active]="mode() === 'register'" (click)="switch('register')">Create account</button>
@@ -25,6 +26,11 @@ import { Api, errorMessage } from '../api';
             <label>Password
               <input name="password" type="password" [(ngModel)]="password" required autocomplete="current-password" />
             </label>
+            @if (needsCode()) {
+              <label>Authenticator code <small class="muted">(or a recovery code)</small>
+                <input name="otp" [(ngModel)]="otp" required autocomplete="one-time-code" inputmode="numeric" maxlength="19" />
+              </label>
+            }
             @if (error()) { <p class="error">{{ error() }}</p> }
             <button class="primary" [disabled]="busy() || f.invalid">{{ busy() ? 'Signing in…' : 'Login' }}</button>
           </form>
@@ -68,6 +74,12 @@ export class AuthPage {
   private api = inject(Api);
   private router = inject(Router);
 
+  /** Arrived from the lockout email's unlock link. */
+  readonly unlocked = inject(ActivatedRoute).snapshot.queryParamMap.get('unlocked') === '1';
+  /** The password was right and the account has two-factor login on: ask for the code. */
+  needsCode = signal(false);
+  otp = '';
+
   mode = signal<'login' | 'register'>('login');
   busy = signal(false);
   error = signal('');
@@ -86,12 +98,13 @@ export class AuthPage {
     this.error.set('');
     try {
       if (this.mode() === 'login') {
-        await this.api.login(this.username, this.password);
+        await this.api.login(this.username, this.password, this.needsCode() ? this.otp : undefined);
       } else {
         await this.api.register({ ...this.reg, address: this.reg.address || null, pan: this.reg.pan || null });
       }
       this.router.navigate(['/']);
     } catch (e) {
+      if (isProblem(e, 'mfa-required')) this.needsCode.set(true);
       this.error.set(errorMessage(e));
     } finally {
       this.busy.set(false);

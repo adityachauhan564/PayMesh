@@ -3,7 +3,7 @@ import { HttpClient, HttpErrorResponse, provideHttpClient, withInterceptors } fr
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ActivatedRouteSnapshot, Router, RouterStateSnapshot, UrlTree, provideRouter } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
-import { Api, authGuard, authInterceptor, errorMessage } from './api';
+import { Api, authGuard, authInterceptor, errorMessage, isProblem } from './api';
 
 const USER = { userId: 1, fullName: 'Asha', mobileNo: '9000000001', emailId: 'asha@example.com', createdDate: '2026-01-01' };
 const SESSION = { token: 't1', user: USER };
@@ -136,6 +136,48 @@ describe('Api session', () => {
     await done;
     expect(api.session()).toBeNull();
     expect(navigate).toHaveBeenCalledWith(['/login']);
+  });
+});
+
+describe('Api two-factor', () => {
+  afterEach(() => TestBed.inject(HttpTestingController).verify());
+
+  it('login sends the code when given', async () => {
+    const { api, backend } = setup(false);
+    const login = api.login('9000000001', 'secret123', '123456');
+    const req = backend.expectOne('/api/auth/login');
+    expect(req.request.body).toEqual({ username: '9000000001', password: 'secret123', otp: '123456' });
+    req.flush(SESSION);
+    await login;
+  });
+
+  it('step-up replaces the session token', async () => {
+    const { api, backend } = setup(true);
+    const stepUp = api.stepUp('654321');
+    const req = backend.expectOne('/api/users/me/step-up');
+    expect(req.request.body).toEqual({ code: '654321' });
+    req.flush({ token: 't-otp', user: USER });
+    await stepUp;
+    expect(api.session()?.token).toBe('t-otp');
+  });
+
+  it('unlock posts the token from the email link', async () => {
+    const { api, backend } = setup(false);
+    const unlock = api.unlock('abc');
+    const req = backend.expectOne('/api/auth/unlock');
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual({ token: 'abc' });
+    req.flush(null, { status: 204, statusText: 'No Content' });
+    await unlock;
+  });
+});
+
+describe('isProblem', () => {
+  it('reads the ProblemDetail type', () => {
+    const e = new HttpErrorResponse({ status: 401, error: { type: 'https://paymesh.dev/problems/mfa-required' } });
+    expect(isProblem(e, 'mfa-required')).toBe(true);
+    expect(isProblem(e, 'step-up-required')).toBe(false);
+    expect(isProblem(new Error('x'), 'mfa-required')).toBe(false);
   });
 });
 
