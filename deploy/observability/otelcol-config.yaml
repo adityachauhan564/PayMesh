@@ -23,22 +23,36 @@ extensions:
 
 processors:
   batch:
-  # Patterns avoid backslashes (OTTL strings don't take them): [.] is a literal dot, and the mobile pattern keeps
-  # its neighbours ($${1}, $${3}: $$ escapes the collector's env expansion) so a 10-digit run inside a longer number (timestamps, ids) is left alone.
+  # Patterns avoid backslashes (OTTL strings don't take them): [.] is a literal dot. The mobile pattern keeps its
+  # neighbours ($${1}, $${3}; $$ escapes the collector's env expansion) so a 10-digit run inside a longer number
+  # (timestamps, ids) is left alone; it also takes a +91/91/0 prefix, and runs twice because each match consumes the
+  # character after it (back-to-back numbers). Span events hold exception messages, e.g. a duplicate-key error that
+  # quotes an email, so they are scrubbed too.
   transform/scrub:
     error_mode: ignore
     log_statements:
       - context: log
         statements:
           - replace_pattern(body, "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}", "***@***")
-          - replace_pattern(body, "(^|[^0-9])([6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_pattern(body, "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_pattern(body, "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
           - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}", "***@***")
-          - replace_all_patterns(attributes, "value", "(^|[^0-9])([6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_all_patterns(attributes, "value", "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_all_patterns(attributes, "value", "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
     trace_statements:
       - context: span
         statements:
+          - replace_pattern(name, "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}", "***@***")
+          - replace_pattern(name, "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_pattern(name, "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
           - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}", "***@***")
-          - replace_all_patterns(attributes, "value", "(^|[^0-9])([6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_all_patterns(attributes, "value", "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_all_patterns(attributes, "value", "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+      - context: spanevent
+        statements:
+          - replace_all_patterns(attributes, "value", "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}", "***@***")
+          - replace_all_patterns(attributes, "value", "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
+          - replace_all_patterns(attributes, "value", "(^|[^0-9])((?:[+]?91|0)?[6-9][0-9]{9})([^0-9]|$)", "$${1}**********$${3}")
 
 exporters:
   otlp_http/metrics:

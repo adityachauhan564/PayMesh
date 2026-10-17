@@ -4,6 +4,8 @@ import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -42,16 +44,23 @@ public class ReconciliationService {
     }
 
     public ReconciliationReport reconcile() {
-        List<ReconciliationReport.Mismatch> mismatches = jdbc.query(MISMATCHES, (rs, row) -> new ReconciliationReport.Mismatch(
+        List<ReconciliationReport.Mismatch> found = jdbc.query(MISMATCHES, (rs, row) -> new ReconciliationReport.Mismatch(
                 rs.getLong("user_id"), rs.getBigDecimal("balance"), rs.getBigDecimal("ledger")));
-        return new ReconciliationReport(mismatches, jdbc.queryForObject(NET, BigDecimal.class));
+        ReconciliationReport report = new ReconciliationReport(found, jdbc.queryForObject(NET, BigDecimal.class));
+        this.mismatches.set(report.mismatches().size() + (report.netOfAllPostings().signum() == 0 ? 0 : 1));
+        return report;
+    }
+
+    /** A restart must not reset the mismatch gauge to 0 (which would silently resolve the alert): check once now. */
+    @EventListener(ApplicationReadyEvent.class)
+    public void onStartup() {
+        reconcile();
     }
 
     @Scheduled(cron = "${ledger.reconcile-cron}")
     @SchedulerLock(name = "ledger-reconcile", lockAtMostFor = "PT10M")
     public void nightly() {
         ReconciliationReport report = reconcile();
-        mismatches.set(report.mismatches().size() + (report.netOfAllPostings().signum() == 0 ? 0 : 1));
         if (report.clean()) {
             log.info("Ledger reconciled: every wallet matches its postings");
         } else {

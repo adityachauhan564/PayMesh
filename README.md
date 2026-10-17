@@ -396,7 +396,7 @@ The outbox is what normally breaks a trace: the event is written in the request'
 | Metric | What it shows |
 |---|---|
 | `paymesh_payments_completed_total{status,type}` | Payments reaching a final status |
-| `paymesh_payments_duration` | Time from creating a payment to its result (the whole saga) |
+| `paymesh_payments_duration_milliseconds` (histogram) | Time from creating a payment to its result (the whole saga); the dashboard shows p50/p95/p99 |
 | `paymesh_outbox_backlog` | Events written but not yet on Kafka, per service |
 | `paymesh_deadletters_new` | Messages that failed all retries and wait for replay |
 | `paymesh_ledger_mismatches` | Problems found by the last nightly reconciliation |
@@ -405,7 +405,7 @@ Plus HTTP, JVM, and Kafka client metrics (consumer lag included). Tags stay low-
 
 **Provisioned as code** (`deploy/observability`): two dashboards (*Payments*; *Messaging & ledger*) and three alert rules: outbox backlog above 100 for 5 minutes, any dead letter waiting, any ledger mismatch.
 
-**Personal data never reaches storage.** The collector's `transform/scrub` step masks email addresses and Indian mobile numbers in every log line and in log and span attributes before anything is written, and notification_service logs a mail it isn't sending with a masked recipient and no body (the full text only at DEBUG). Scheduled pollers and health probes aren't traced, so they don't bury real requests.
+**Emails and mobile numbers are masked before storage.** The collector's `transform/scrub` step masks email addresses and Indian mobile numbers (with or without `+91`/`0`) in every log line, log and span attribute, span name and span event (exception messages) before anything is written, and notification_service logs a mail it isn't sending with a masked recipient and no body (the full text only at DEBUG). Scheduled pollers and health probes aren't traced, so they don't bury real requests.
 
 Export is off by default (`OTLP_ENABLED=false`), so tests and plain IDE runs don't look for a collector; compose turns it on. Export is batched and asynchronous: with the collector down, requests are unaffected.
 

@@ -160,7 +160,7 @@ class LedgerIntegrationTest {
         try {
             ReconciliationReport report = reconciliation.reconcile();
 
-            reconciliation.nightly();
+            reconciliation.reconcile(); // any reconciliation (not only the nightly one) keeps the gauge current
             assertThat(meterRegistry.get("paymesh.ledger.mismatches").gauge().value()).isEqualTo(1.0);
             assertThat(report.mismatches()).singleElement().satisfies(m -> {
                 assertThat(m.userId()).isEqualTo(3L);
@@ -169,7 +169,7 @@ class LedgerIntegrationTest {
         } finally {
             jdbc.update("UPDATE wallet SET balance = balance - 1 WHERE user_id = 3");
         }
-        reconciliation.nightly();
+        reconciliation.reconcile();
         assertThat(meterRegistry.get("paymesh.ledger.mismatches").gauge().value()).isZero();
     }
 }
