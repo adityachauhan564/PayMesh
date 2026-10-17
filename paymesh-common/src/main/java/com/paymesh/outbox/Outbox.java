@@ -16,11 +16,13 @@ public class Outbox {
     private final OutboxEventRepository repository;
     private final JsonMapper jsonMapper;
     private final String producer;
+    private final OutboxTracing tracing;
 
-    Outbox(OutboxEventRepository repository, JsonMapper jsonMapper, String producer) {
+    Outbox(OutboxEventRepository repository, JsonMapper jsonMapper, String producer, OutboxTracing tracing) {
         this.repository = repository;
         this.jsonMapper = jsonMapper;
         this.producer = producer;
+        this.tracing = tracing;
     }
 
     /**
@@ -35,7 +37,9 @@ public class Outbox {
     /** For payloads that already are JSON (e.g. replaying a dead letter): stored as is, not re-encoded. */
     @Transactional(propagation = Propagation.MANDATORY)
     public void publishJson(String topic, String key, String json) {
-        repository.save(new OutboxEvent(producer, topic, key, json, MDC.get(CorrelationIdLoggingFilter.MDC_KEY)));
+        OutboxEvent event = new OutboxEvent(producer, topic, key, json, MDC.get(CorrelationIdLoggingFilter.MDC_KEY));
+        event.traceparent = tracing.currentTraceparent();
+        repository.save(event);
     }
 
     private String toJson(Object payload) {

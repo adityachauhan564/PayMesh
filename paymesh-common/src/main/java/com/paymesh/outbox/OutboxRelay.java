@@ -27,12 +27,14 @@ public class OutboxRelay {
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final TransactionTemplate transaction;
     private final String producer;
+    private final OutboxTracing tracing;
 
     OutboxRelay(OutboxEventRepository repository, KafkaTemplate<String, String> kafkaTemplate,
-                PlatformTransactionManager transactionManager, String producer) {
+                PlatformTransactionManager transactionManager, String producer, OutboxTracing tracing) {
         this.repository = repository;
         this.kafkaTemplate = kafkaTemplate;
         this.producer = producer;
+        this.tracing = tracing;
         this.transaction = new TransactionTemplate(transactionManager);
         // MySQL's default REPEATABLE READ would also lock the gap after the last row, blocking every new outbox
         // insert (registrations, payments) for as long as Kafka takes to answer. READ COMMITTED locks only the rows read.
@@ -53,7 +55,8 @@ public class OutboxRelay {
 
     private boolean sent(OutboxEvent event) {
         try {
-            kafkaTemplate.send(toRecord(event)).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            tracing.inTrace(event.getTraceparent(), event.getTopic(), () -> kafkaTemplate.send(toRecord(event)))
+                    .get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             return true;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
