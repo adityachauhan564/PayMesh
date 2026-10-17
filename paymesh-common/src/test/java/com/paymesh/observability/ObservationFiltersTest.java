@@ -44,10 +44,20 @@ class ObservationFiltersTest {
         assertThat(predicate.test("spring.security.filterchains", null)).isTrue(); // the name-only pre-check
     }
 
+    /** Spring Security takes the request's observation as parent: for a dropped probe request that is a no-op one. */
+    @Test
+    void dropsSecurityObservationsUnderADroppedRequest() {
+        Observation.Context context = new Observation.Context();
+        context.setParentObservation(Observation.NOOP);
+        assertThat(predicate.test("spring.security.filterchains", context)).isFalse();
+    }
+
     @Test
     void keepsSecurityObservationsInsideARequest() {
+        ObservationRegistry registry = ObservationRegistry.create(); // a registry without handlers only makes no-ops
+        registry.observationConfig().observationHandler(context -> true);
         Observation.Context context = new Observation.Context();
-        context.setParentObservation(Observation.start("http.server.requests", ObservationRegistry.create()));
+        context.setParentObservation(Observation.start("http.server.requests", registry));
         assertThat(predicate.test("spring.security.filterchains", context)).isTrue();
     }
 }
