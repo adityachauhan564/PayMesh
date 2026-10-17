@@ -8,6 +8,7 @@ import com.paymesh.enums.PaymentStatus;
 import com.paymesh.repository.TransactionRepository;
 import com.paymesh.security.SecurityConfig;
 import com.paymesh.service.TransactionService;
+import com.paymesh.enums.TransactionType;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -72,7 +73,7 @@ class TransactionControllerTest {
         assertThat(saved.getValue().getSenderId()).isEqualTo(1L);
         assertThat(saved.getValue().getReceiverId()).isEqualTo(2L);
         verify(outbox).publish(TopicConstants.INITIATE_TRANSACTION_TOPIC, "new-id",
-                new InitiateTransactionDto("new-id", 1L, 2L, new BigDecimal("100")));
+                new InitiateTransactionDto("new-id", 1L, 2L, new BigDecimal("100"), TransactionType.TRANSFER));
     }
 
     @Test

@@ -24,17 +24,18 @@ Users can register, add money, send money to other users by mobile number, pay b
 4. [How a request travels](#how-a-request-travels)
 5. [Core flows](#core-flows): registration, payments, login
 6. [Reliability: the transactional outbox](#reliability-the-transactional-outbox)
-7. [Data model](#data-model)
-8. [Kafka event catalogue](#kafka-event-catalogue)
-9. [Security model](#security-model)
-10. [API reference](#api-reference)
-11. [Getting started](#getting-started)
-12. [Configuration](#configuration)
-13. [Testing](#testing)
-14. [Project structure](#project-structure)
-15. [Design decisions](#design-decisions)
-16. [Known limitations and roadmap](#known-limitations-and-roadmap)
-17. [Troubleshooting](#troubleshooting)
+7. [Double-entry ledger](#double-entry-ledger)
+8. [Data model](#data-model)
+9. [Kafka event catalogue](#kafka-event-catalogue)
+10. [Security model](#security-model)
+11. [API reference](#api-reference)
+12. [Getting started](#getting-started)
+13. [Configuration](#configuration)
+14. [Testing](#testing)
+15. [Project structure](#project-structure)
+16. [Design decisions](#design-decisions)
+17. [Known limitations and roadmap](#known-limitations-and-roadmap)
+18. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -344,6 +345,26 @@ notification_service has no database, so its failures stay on `SEND_NOTIFICATION
 
 ---
 
+## Double-entry ledger
+
+A balance column says *what* a wallet holds, never *why*. Every successful payment therefore also writes a **journal entry** in wallet_service: one debit and one credit of the same amount, in the same database transaction as the row-locked balance change. `wallet.balance` stays as a cached balance (O(1) reads), and the ledger can prove it.
+
+| Payment | Debit | Credit |
+|---|---|---|
+| Transfer | sender | receiver |
+| Add money | `PG_CLEARING` (money arriving from the payment gateway) | user |
+| Withdraw | user | `BANK_PAYOUT_CLEARING` (owed to the user's bank) |
+| Bill payment | user | `BILLER_PAYABLE` (owed to the biller) |
+| Balance from before the ledger | `OPENING_BALANCE` | user |
+
+- **Accounts:** one per user (`USER:<id>`, opened with the wallet) plus the system accounts above. User accounts are credit-normal: **balance = credits − debits**.
+- **Rules as a pure function:** `LedgerEntries.forPayment(...)` turns a payment into lines with no Spring and no database, so jqwik checks its invariants over thousands of generated payments (always balanced, users move the right way, the right counterparty).
+- **Exactly once:** rejected payments post nothing; `journal_entry.transaction_id` is unique, behind the existing `wallet_processed_transaction` check.
+- **Opening balances:** the migration that introduced the ledger posted every existing balance against `OPENING_BALANCE`, so history starts consistent. Roll it out with **every wallet_service replica stopped first** (Kubernetes `Recreate`): an old replica still running after the migration would change balances without postings, and reconciliation would flag those wallets from then on.
+- **Reconciliation:** `ReconciliationService` runs nightly (`LEDGER_RECONCILE_CRON`, default 02:30) on **one replica only** (ShedLock row lock, using the database clock). It checks every wallet's cached balance against its postings and that all postings net to zero; a failure is logged at ERROR naming each user and the difference, e.g. `user 3: wallet 101.00, ledger 100.00 (off by 1.00)`.
+
+---
+
 ## Data model
 
 Each service owns its schema on one MySQL server (`user_db`, `wallet_db`, `txn_db`), with its own MySQL user and its own Flyway migrations. **No foreign keys or queries cross service boundaries**: a service user can't even read another schema. The dotted lines are logical references by ID.
@@ -398,6 +419,23 @@ erDiagram
         string bill_account
         datetime payment_initiation_date
     }
+    LEDGER_ACCOUNT {
+        bigint id PK
+        string code UK "USER:id or PG_CLEARING, ..."
+        bigint user_id UK "null for system accounts"
+    }
+    JOURNAL_ENTRY {
+        bigint id PK
+        string transaction_id UK "one entry per payment"
+        string type "TRANSFER, ADD_MONEY, ..., OPENING_BALANCE"
+    }
+    LEDGER_POSTING {
+        bigint id PK
+        bigint entry_id FK
+        bigint account_id FK
+        string direction "DEBIT, CREDIT"
+        decimal amount "DECIMAL(19,2)"
+    }
     OUTBOX_EVENT {
         bigint id PK
         string producer "user-service, wallet-service, transaction-service"
@@ -410,6 +448,9 @@ erDiagram
     WALLET_USER ||..o| WALLET : "owns (by user_id)"
     WALLET_USER ||..o{ WALLET_TRANSACTIONS : "sends or receives"
     WALLET_TRANSACTIONS ||..o| WALLET_PROCESSED_TRANSACTION : "applied as"
+    JOURNAL_ENTRY ||--|{ LEDGER_POSTING : "debit + credit"
+    LEDGER_ACCOUNT ||--o{ LEDGER_POSTING : "posted to"
+    WALLET ||..|| LEDGER_ACCOUNT : "balance = credits - debits"
 ```
 
 Schemas and users are created once, with the MySQL volume, by `deploy/mysql/init/01-service-schemas.sh`. Each service's tables come from Flyway migrations in `src/main/resources/db/migration`, and Hibernate only checks them (`ddl-auto=validate`), so a mismatch stops the service at startup instead of silently altering tables.
@@ -425,7 +466,7 @@ Schemas and users are created once, with the MySQL volume, by `deploy/mysql/init
 | `user-service.userWalletCreation` | user_service | wallet_service | userId | `{userId, userName, userEmailId}` |
 | `user-service.userUpdation` | user_service | wallet_service | userId | `{userId, userName, userEmailId}` |
 | `user-service.userDeletion` | user_service | wallet_service | userId | `userId` (deletes the wallet only if its balance is 0) |
-| `INITIATE_TRANSACTION_TOPIC` | transaction_service | wallet_service | transactionId | `{transactionId, fromUserId, toUserId, amount}` |
+| `INITIATE_TRANSACTION_TOPIC` | transaction_service | wallet_service | transactionId | `{transactionId, fromUserId, toUserId, amount, type}` (`type` picks the ledger accounts) |
 | `COMPLETED_TRANSACTION_TOPIC` | wallet_service | transaction_service | transactionId | `{transactionId, paymentStatus, reason, fromName, toName}` |
 | `SEND_NOTIFICATION` | user_service, wallet_service | notification_service | recipient email | `{receiverMailId, subject, message}` |
 
@@ -649,6 +690,7 @@ All settings come from environment variables with local-friendly defaults.
 | `DB_USERNAME` / `DB_PASSWORD` | **required** (`local` profile: `user_svc` / `wallet_svc` / `txn_svc`, password `change-me-local-only`) | user, wallet, transaction | The service's own MySQL user |
 | `USER_DB_PASSWORD` / `WALLET_DB_PASSWORD` / `TXN_DB_PASSWORD` | **required** (compose only) | mysql init, services | Passwords for the three service users |
 | `KAFKA_SERVERS` | `localhost:9092` | all services | Kafka bootstrap servers |
+| `LEDGER_RECONCILE_CRON` | `0 30 2 * * *` (02:30 daily) | wallet | When the ledger reconciliation runs (Spring cron, one replica via ShedLock) |
 | `USER_SERVICE_URL` / `WALLET_SERVICE_URL` / `TRANSACTION_SERVICE_URL` | `http://localhost:8081` / `:8091` / `:8086` | gateway | Route targets |
 | `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | `localhost` / `6379` / none | gateway | Rate-limit store |
 | `LOGIN_RATE_LIMIT_BURST_CAPACITY` / `…_REQUESTED_TOKENS` / `…_REPLENISH_RATE` | `60` / `12` / `1` | gateway | Token bucket: 5 attempts at once, then 1 every 12 s |
@@ -724,6 +766,8 @@ paymesh/
 | **JWT validated at gateway *and* services** | Defence in depth: bypassing the gateway grants nothing; services never trust headers |
 | **HS256 shared secret** | Simple for one issuer inside one trust boundary; easy to move to RS256/JWKS if third parties ever verify tokens |
 | **Schema per service, Flyway migrations, `ddl-auto=validate`** | Services can't couple through tables; every schema change is reviewed SQL with a history; a drifted schema fails fast at startup |
+| **Double-entry ledger plus a cached balance** | Reads stay O(1); every rupee is explained by balanced postings, and a nightly reconciliation proves cache and ledger agree |
+| **Ledger rules as a pure function** | The invariants (balanced, right accounts) are property-tested over thousands of generated payments, independent of Spring and MySQL |
 | **`BigDecimal` for money** | `double` can't represent ₹0.10 exactly |
 | **ProblemDetail (RFC 7807) everywhere** | One error shape for the UI, from the gateway and every service |
 | **`spring.jpa.open-in-view=false` in user_service** | With it on, the row-locked read returned a stale cached copy and concurrent failed logins overwrote each other's count |

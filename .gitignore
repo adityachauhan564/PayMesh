@@ -41,3 +41,5 @@ build/
 .env
 # Superpowers plan workspaces
 .superpowers/
+# jqwik run state (failure replay database)
+.jqwik-database

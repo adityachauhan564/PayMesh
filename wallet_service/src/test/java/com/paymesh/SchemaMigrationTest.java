@@ -32,7 +32,7 @@ class SchemaMigrationTest {
     @Test
     void flywayBuildsTheSchemaHibernateExpects() {
         assertThat(jdbc.queryForList("SELECT version FROM flyway_schema_history WHERE success = 1", String.class))
-                .containsExactly("1", "2", "3");
+                .containsExactly("1", "2", "3", "4", "5");
     }
 
     @Test
@@ -52,5 +52,25 @@ class SchemaMigrationTest {
         Flyway.configure().dataSource(dataSource).load().migrate();
 
         assertThat(jdbc.queryForObject("SELECT event_id FROM outbox_event WHERE producer = 'p'", String.class)).hasSize(36);
+    }
+
+    /** Money that existed before the ledger must appear in it, balanced against OPENING_BALANCE. */
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void openingBalancesAreBackfilled(@Autowired DataSource dataSource) {
+        Flyway toV3 = Flyway.configure().dataSource(dataSource).cleanDisabled(false).target("3").load();
+        toV3.clean();
+        toV3.migrate();
+        jdbc.update("INSERT INTO wallet (user_id, balance, daily_limit, daily_transaction_limit, spent_today, txn_count_today) "
+                + "VALUES (900, 250.00, 10000, 10, 0, 0)");
+        Long walletId = jdbc.queryForObject("SELECT wallet_id FROM wallet WHERE user_id = 900", Long.class);
+
+        Flyway.configure().dataSource(dataSource).load().migrate();
+
+        assertThat(jdbc.queryForList("SELECT code FROM ledger_account WHERE user_id = 900", String.class)).containsExactly("USER:900");
+        assertThat(jdbc.queryForList("SELECT CONCAT(a.code, ' ', p.direction, ' ', p.amount) FROM ledger_posting p "
+                        + "JOIN journal_entry e ON e.id = p.entry_id JOIN ledger_account a ON a.id = p.account_id "
+                        + "WHERE e.transaction_id = ?", String.class, "opening-" + walletId))
+                .containsExactlyInAnyOrder("OPENING_BALANCE DEBIT 250.00", "USER:900 CREDIT 250.00");
     }
 }
