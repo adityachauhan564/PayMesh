@@ -360,7 +360,7 @@ A balance column says *what* a wallet holds, never *why*. Every successful payme
 - **Accounts:** one per user (`USER:<id>`, opened with the wallet) plus the system accounts above. User accounts are credit-normal: **balance = credits − debits**.
 - **Rules as a pure function:** `LedgerEntries.forPayment(...)` turns a payment into lines with no Spring and no database, so jqwik checks its invariants over thousands of generated payments (always balanced, users move the right way, the right counterparty).
 - **Exactly once:** rejected payments post nothing; `journal_entry.transaction_id` is unique, behind the existing `wallet_processed_transaction` check.
-- **Opening balances:** the migration that introduced the ledger posted every existing balance against `OPENING_BALANCE`, so history starts consistent.
+- **Opening balances:** the migration that introduced the ledger posted every existing balance against `OPENING_BALANCE`, so history starts consistent. Roll it out with **every wallet_service replica stopped first** (Kubernetes `Recreate`): an old replica still running after the migration would change balances without postings, and reconciliation would flag those wallets from then on.
 - **Reconciliation:** `ReconciliationService` runs nightly (`LEDGER_RECONCILE_CRON`, default 02:30) on **one replica only** (ShedLock row lock, using the database clock). It checks every wallet's cached balance against its postings and that all postings net to zero; a failure is logged at ERROR naming each user and the difference, e.g. `user 3: wallet 101.00, ledger 100.00 (off by 1.00)`.
 
 ---
