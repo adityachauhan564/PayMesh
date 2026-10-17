@@ -9,6 +9,8 @@ import com.paymesh.dto.UserWalletCreationRequest;
 import com.paymesh.entity.ProcessedTransaction;
 import com.paymesh.entity.Wallet;
 import com.paymesh.enums.PaymentStatus;
+import com.paymesh.enums.TransactionType;
+import com.paymesh.ledger.Ledger;
 import com.paymesh.outbox.Outbox;
 import com.paymesh.repository.ProcessedTransactionRepository;
 import com.paymesh.repository.WalletRepository;
@@ -39,12 +41,16 @@ public class WalletOperations {
     @Autowired
     private Outbox outbox;
 
+    @Autowired
+    private Ledger ledger;
+
     @Transactional
     public void createWalletForNewUser(UserWalletCreationRequest user) {
         if (walletRepository.existsByUserId(user.userId())) {
             return; // redelivered event: wallet and welcome email already exist
         }
         Wallet wallet = walletRepository.save(new Wallet(user.userId(), user.userName(), user.userEmailId()));
+        ledger.openAccount(user.userId());
         log.info("Wallet {} created for userId {}", wallet.getWalletId(), user.userId());
         sendMail(new SendMailNotification(user.userEmailId(), "Welcome to PayMesh",
                 String.format("Hi %s,%n%nYour PayMesh is ready. Your daily limit is Rs. %s and %d transactions per day; "
@@ -117,6 +123,10 @@ public class WalletOperations {
             } catch (IllegalStateException e) {
                 reason = e.getMessage();
             }
+        }
+        if (reason == null) {
+            TransactionType type = txn.type() != null ? txn.type() : TransactionType.infer(txn.fromUserId(), txn.toUserId());
+            ledger.post(txn.transactionId(), type, txn.fromUserId(), txn.toUserId(), txn.amount());
         }
 
         TransactionResultDto result = new TransactionResultDto(txn.transactionId(),
