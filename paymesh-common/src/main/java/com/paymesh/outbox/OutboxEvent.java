@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /**
  * A Kafka message waiting to be published. Written in the same transaction as the data change it describes,
@@ -40,10 +41,20 @@ public class OutboxEvent {
     @CreationTimestamp
     private Instant createdAt;
 
-    OutboxEvent(String producer, String topic, String messageKey, String payload) {
+    /** Sent as the eventId header; unique per event, so consumers can drop redeliveries. */
+    @Column(name = "event_id", nullable = false, length = 36, columnDefinition = "char(36)")
+    private String eventId;
+
+    /** The request's correlation id when the event was written; null outside a request or consumed event. */
+    @Column(name = "correlation_id", length = 64)
+    private String correlationId;
+
+    OutboxEvent(String producer, String topic, String messageKey, String payload, String correlationId) {
         this.producer = producer;
         this.topic = topic;
         this.messageKey = messageKey;
         this.payload = payload;
+        this.correlationId = correlationId;
+        this.eventId = UUID.randomUUID().toString();
     }
 }

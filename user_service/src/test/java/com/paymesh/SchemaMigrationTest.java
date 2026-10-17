@@ -11,6 +11,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import javax.sql.DataSource;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -42,11 +46,25 @@ class SchemaMigrationTest {
     @Test
     void flywayBuildsTheSchemaHibernateExpects() {
         assertThat(jdbc.queryForList("SELECT version FROM flyway_schema_history WHERE success = 1", String.class))
-                .containsExactly("1");
+                .containsExactly("1", "2");
     }
 
     @Test
     void secondMigrateIsNoOp(@Autowired Flyway flyway) {
         assertThat(flyway.migrate().migrationsExecuted).isZero();
+    }
+
+    /** An event still waiting in the outbox when V2 is deployed must get an eventId and stay publishable. */
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED) // Flyway's ALTER would wait forever on the test transaction's locks
+    void rowsWrittenBeforeV2GetAnEventId(@Autowired DataSource dataSource) {
+        Flyway toV1 = Flyway.configure().dataSource(dataSource).cleanDisabled(false).target("1").load();
+        toV1.clean();
+        toV1.migrate();
+        jdbc.update("INSERT INTO outbox_event (producer, topic, message_key, payload) VALUES ('p', 't', 'k', '{}')");
+
+        Flyway.configure().dataSource(dataSource).load().migrate();
+
+        assertThat(jdbc.queryForObject("SELECT event_id FROM outbox_event WHERE producer = 'p'", String.class)).hasSize(36);
     }
 }

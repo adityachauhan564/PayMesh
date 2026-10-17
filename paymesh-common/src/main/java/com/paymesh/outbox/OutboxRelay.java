@@ -1,12 +1,15 @@
 package com.paymesh.outbox;
 
+import com.paymesh.kafka.EventHeaders;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -50,8 +53,7 @@ public class OutboxRelay {
 
     private boolean sent(OutboxEvent event) {
         try {
-            kafkaTemplate.send(event.getTopic(), event.getMessageKey(), event.getPayload())
-                    .get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            kafkaTemplate.send(toRecord(event)).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             return true;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -61,5 +63,14 @@ public class OutboxRelay {
             log.warn("Outbox event {} for {} not published yet, will retry: {}", event.getId(), event.getTopic(), e.toString());
             return false;
         }
+    }
+
+    private static ProducerRecord<String, String> toRecord(OutboxEvent event) {
+        ProducerRecord<String, String> record = new ProducerRecord<>(event.getTopic(), event.getMessageKey(), event.getPayload());
+        record.headers().add(EventHeaders.EVENT_ID, event.getEventId().getBytes(StandardCharsets.UTF_8));
+        if (event.getCorrelationId() != null) {
+            record.headers().add(EventHeaders.CORRELATION_ID, event.getCorrelationId().getBytes(StandardCharsets.UTF_8));
+        }
+        return record;
     }
 }
