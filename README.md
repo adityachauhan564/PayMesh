@@ -559,7 +559,7 @@ curl -s -X POST localhost:8080/api/transactions -H "Authorization: Bearer $TOKEN
   -d '{"type":"ADD_MONEY","amount":1000}'
 
 # Safe to retry: the same Idempotency-Key never pays twice
-curl -s -X POST localhost:8080/api/transactions -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json'   -H 'Idempotency-Key: 6f1c2a9e-topup-1' -d '{"type":"ADD_MONEY","amount":1000}'
+curl -s -X POST localhost:8080/api/transactions -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \n  -H 'Idempotency-Key: 6f1c2a9e-topup-1' -d '{"type":"ADD_MONEY","amount":1000}'
 
 # Send money (find the receiver's userId with /api/users/lookup first)
 curl -s -X POST localhost:8080/api/transactions -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
