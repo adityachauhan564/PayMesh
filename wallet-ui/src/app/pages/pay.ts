@@ -86,7 +86,7 @@ const TABS: { type: TxnType; label: string }[] = [
           @if (error()) { <p class="error">{{ error() }}</p> }
           @if (stepUpNeeded()) {
             <label>Authenticator code
-              <input name="stepUpCode" [(ngModel)]="stepUpCode" required autocomplete="one-time-code" inputmode="numeric" maxlength="19" />
+              <input name="stepUpCode" [(ngModel)]="stepUpCode" required autocomplete="one-time-code" maxlength="19" />
             </label>
           }
           <button class="primary" [disabled]="busy() || f.invalid || (type() === 'TRANSFER' && !receiver())">

@@ -275,7 +275,7 @@ flowchart TD
     lock --> r2
 ```
 
-The lockout email carries a **one-time unlock link** (30 minutes, single use, replaced by any newer lock). It opens the web app's `/unlock` page, which POSTs the token: opening the link alone changes nothing, so mail scanners can't unlock anyone.
+The lockout email carries a **one-time unlock link** (valid until the lock would end anyway, at most 30 minutes; single use; replaced by any newer lock). It opens the web app's `/unlock` page, and only the owner's click on **Unlock my account** sends the token: opening the link, or a scanner loading the page, changes nothing.
 
 | Defence | Where | Stops | Default |
 |---|---|---|---|

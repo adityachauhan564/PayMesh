@@ -28,7 +28,7 @@ import { Api, errorMessage, isProblem } from '../api';
             </label>
             @if (needsCode()) {
               <label>Authenticator code <small class="muted">(or a recovery code)</small>
-                <input name="otp" [(ngModel)]="otp" required autocomplete="one-time-code" inputmode="numeric" maxlength="19" />
+                <input name="otp" [(ngModel)]="otp" required autocomplete="one-time-code" maxlength="19" />
               </label>
             }
             @if (error()) { <p class="error">{{ error() }}</p> }

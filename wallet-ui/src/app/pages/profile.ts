@@ -1,3 +1,4 @@
+import QRCode from 'qrcode';
 import { Component, inject, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api, errorMessage } from '../api';
@@ -54,9 +55,9 @@ import { Api, errorMessage } from '../api';
           <button type="submit" [disabled]="df.invalid">Turn off</button>
         </form>
       } @else if (setup()) {
-        <p class="muted">Add this key to Google Authenticator, Authy or 1Password, then enter the 6-digit code it shows.</p>
-        <p><code>{{ setup()!.secret }}</code></p>
-        <p class="muted small"><a [href]="setup()!.otpauthUri">Open in an authenticator app</a></p>
+        <p class="muted">Scan this with Google Authenticator, Authy or 1Password, then enter the 6-digit code it shows.</p>
+        @if (qr()) { <img class="qr" [src]="qr()" alt="QR code for your authenticator app" width="200" height="200" /> }
+        <p class="muted small">Can't scan? Enter this key instead: <code>{{ setup()!.secret }}</code></p>
         <form #ef="ngForm" (ngSubmit)="ef.valid && enable2fa()">
           <label>Code <input name="code" [(ngModel)]="tfCode" required autocomplete="one-time-code" inputmode="numeric" maxlength="6" /></label>
           <button class="primary" [disabled]="ef.invalid">Turn on</button>
@@ -90,6 +91,7 @@ export class ProfilePage implements OnInit {
 
   twoFactorOn = signal(false);
   setup = signal<{ secret: string; otpauthUri: string } | null>(null);
+  qr = signal('');
   recoveryCodes = signal<string[]>([]);
   tfError = signal('');
   tfPassword = '';
@@ -106,7 +108,11 @@ export class ProfilePage implements OnInit {
   }
 
   async setup2fa() {
-    await this.twoFactor(async () => this.setup.set(await this.api.setup2fa(this.tfPassword)));
+    await this.twoFactor(async () => {
+      const setup = await this.api.setup2fa(this.tfPassword);
+      this.qr.set(await QRCode.toDataURL(setup.otpauthUri, { width: 200, margin: 1 }));
+      this.setup.set(setup);
+    });
   }
 
   async enable2fa() {

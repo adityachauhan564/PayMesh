@@ -173,3 +173,4 @@ button.more { width: 100%; margin-top: 8px; }
 
 .notice { background: var(--sky-soft, #e0f2fe); color: var(--navy, #0b2545); padding: 8px 12px; border-radius: 8px; }
 .codes { font-family: ui-monospace, monospace; background: var(--bg-soft, #f1f5f9); padding: 12px; border-radius: 8px; }
+.qr { display: block; margin: 8px auto; background: #fff; padding: 8px; border-radius: 8px; }
