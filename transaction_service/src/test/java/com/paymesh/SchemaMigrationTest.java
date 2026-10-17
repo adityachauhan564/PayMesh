@@ -32,7 +32,7 @@ class SchemaMigrationTest {
     @Test
     void flywayBuildsTheSchemaHibernateExpects() {
         assertThat(jdbc.queryForList("SELECT version FROM flyway_schema_history WHERE success = 1", String.class))
-                .containsExactly("1", "2");
+                .containsExactly("1", "2", "3");
     }
 
     @Test
