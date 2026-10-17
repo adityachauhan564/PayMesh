@@ -16,7 +16,7 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -36,7 +36,7 @@ jobs:
       run:
         working-directory: wallet-ui
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
@@ -49,6 +49,6 @@ jobs:
   images:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: cp .env.example .env
       - run: sh scripts/build-images.sh
