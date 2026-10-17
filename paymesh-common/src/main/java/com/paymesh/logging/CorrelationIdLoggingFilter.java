@@ -26,7 +26,7 @@ public class CorrelationIdLoggingFilter extends OncePerRequestFilter {
     public static final String HEADER = "X-Correlation-Id";
     public static final String MDC_KEY = "correlationId";
 
-    private static final Pattern SAFE_ID = Pattern.compile("[A-Za-z0-9-]{1,64}");
+    static final Pattern SAFE_ID = Pattern.compile("[A-Za-z0-9-]{1,64}");
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
