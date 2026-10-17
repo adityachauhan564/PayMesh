@@ -7,6 +7,7 @@ import com.paymesh.dto.TransactionResultDto;
 import com.paymesh.dto.UserWalletCreationRequest;
 import com.paymesh.entity.Wallet;
 import com.paymesh.enums.PaymentStatus;
+import com.paymesh.enums.TransactionType;
 import com.paymesh.outbox.Outbox;
 import com.paymesh.repository.ProcessedTransactionRepository;
 import com.paymesh.repository.WalletRepository;
@@ -65,7 +66,7 @@ class WalletOperationsTest {
         when(walletRepository.findLockedByUserId(1L)).thenReturn(Optional.of(asha));
         when(walletRepository.findLockedByUserId(2L)).thenReturn(Optional.of(bala));
 
-        walletOperations.applyTransaction(new InitiateTransactionDto("t1", 1L, 2L, new BigDecimal("200")));
+        walletOperations.applyTransaction(new InitiateTransactionDto("t1", 1L, 2L, new BigDecimal("200"), TransactionType.TRANSFER));
 
         assertThat(asha.getBalance()).isEqualByComparingTo("300");
         assertThat(bala.getBalance()).isEqualByComparingTo("200");
@@ -80,7 +81,7 @@ class WalletOperationsTest {
         Wallet asha = wallet(1L, "Asha", "50");
         when(walletRepository.findLockedByUserId(1L)).thenReturn(Optional.of(asha));
 
-        walletOperations.applyTransaction(new InitiateTransactionDto("t2", 1L, null, new BigDecimal("200")));
+        walletOperations.applyTransaction(new InitiateTransactionDto("t2", 1L, null, new BigDecimal("200"), TransactionType.WITHDRAW));
 
         assertThat(asha.getBalance()).isEqualByComparingTo("50");
         verify(outbox).publish(TopicConstants.COMPLETED_TRANSACTION_TOPIC, "t2",
@@ -92,7 +93,7 @@ class WalletOperationsTest {
     void aRedeliveredPaymentIsNotAppliedOrAnnouncedAgain() {
         when(processedTransactionRepository.existsById("t1")).thenReturn(true);
 
-        walletOperations.applyTransaction(new InitiateTransactionDto("t1", 1L, 2L, new BigDecimal("200")));
+        walletOperations.applyTransaction(new InitiateTransactionDto("t1", 1L, 2L, new BigDecimal("200"), TransactionType.TRANSFER));
 
         verify(walletRepository, never()).findLockedByUserId(anyLong());
         verifyNoInteractions(outbox);

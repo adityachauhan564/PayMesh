@@ -5,6 +5,7 @@ import com.paymesh.deadletter.DeadLetter;
 import com.paymesh.deadletter.DeadLetterRepository;
 import com.paymesh.dto.InitiateTransactionDto;
 import com.paymesh.dto.UserWalletCreationRequest;
+import com.paymesh.enums.TransactionType;
 import com.paymesh.repository.WalletRepository;
 import com.paymesh.support.MySqlTestContainer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -64,7 +65,7 @@ class WalletSagaIntegrationTest {
                 json.writeValueAsString(new UserWalletCreationRequest(101L, "Asha", "asha@example.com"))).get();
         await().atMost(Duration.ofSeconds(20)).until(() -> wallets.findByUserId(101L).isPresent());
 
-        String initiate = json.writeValueAsString(new InitiateTransactionDto("t-1", null, 101L, new BigDecimal("500")));
+        String initiate = json.writeValueAsString(new InitiateTransactionDto("t-1", null, 101L, new BigDecimal("500"), TransactionType.ADD_MONEY));
         for (int i = 0; i < 2; i++) { // the second send is a redelivery
             ProducerRecord<String, String> record = new ProducerRecord<>(TopicConstants.INITIATE_TRANSACTION_TOPIC, "t-1", initiate);
             record.headers().add("correlationId", "corr-123".getBytes(StandardCharsets.UTF_8));

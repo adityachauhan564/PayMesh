@@ -8,6 +8,7 @@ import com.paymesh.dto.TransactionResultDto;
 import com.paymesh.entity.Transaction;
 import com.paymesh.outbox.Outbox;
 import com.paymesh.enums.PaymentStatus;
+import com.paymesh.enums.TransactionType;
 import com.paymesh.repository.TransactionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
@@ -66,7 +67,8 @@ public class TransactionService {
         }
 
         Transaction saved = transactionRepository.save(txn);
-        InitiateTransactionDto event = new InitiateTransactionDto(saved.getTransactionId(), saved.getSenderId(), saved.getReceiverId(), saved.getAmount());
+        InitiateTransactionDto event = new InitiateTransactionDto(saved.getTransactionId(), saved.getSenderId(), saved.getReceiverId(), saved.getAmount(),
+                TransactionType.valueOf(saved.getType().name()));
         outbox.publish(TopicConstants.INITIATE_TRANSACTION_TOPIC, saved.getTransactionId(), event);
         return saved;
     }
