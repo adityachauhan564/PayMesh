@@ -90,6 +90,11 @@ public class UserController {
                 .sameSite("Strict").path("/api/auth").maxAge(maxAge).build().toString();
     }
 
+    @PostMapping("/users/me/step-up")
+    public AuthResponse stepUp(@AuthenticationPrincipal Jwt jwt, @RequestBody @Valid com.paymesh.auth.TwoFactorController.CodeRequest request) {
+        return userOperationsService.stepUp(Long.parseLong(jwt.getSubject()), request.code());
+    }
+
     @GetMapping("/users/me")
     public UserResponse me(@AuthenticationPrincipal Jwt jwt) {
         return UserResponse.of(userOperationsService.getUser(Long.valueOf(jwt.getSubject())));

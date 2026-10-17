@@ -49,7 +49,7 @@ class TwoFactorIntegrationTest {
 
     private final HttpClient http = HttpClient.newHttpClient();
 
-    record Account(String mobile, String token) {
+    record Account(String mobile, String token, String refreshCookie) {
     }
 
     HttpResponse<String> post(String path, String body, String bearer) throws Exception {
@@ -67,7 +67,9 @@ class TwoFactorIntegrationTest {
         HttpResponse<String> response = post("/api/auth/register", "{\"fullName\":\"Asha\",\"mobileNo\":\"" + mobile
                 + "\",\"emailId\":\"u" + mobile + "@example.com\",\"password\":\"secret123\"}", null);
         assertThat(response.statusCode()).isEqualTo(201);
-        return new Account(mobile, JsonPath.read(response.body(), "$.token"));
+        String cookie = response.headers().allValues("Set-Cookie").stream().filter(c -> c.startsWith("paymesh_refresh=")).findFirst()
+                .map(c -> c.substring("paymesh_refresh=".length(), c.indexOf(';'))).orElseThrow();
+        return new Account(mobile, JsonPath.read(response.body(), "$.token"), cookie);
     }
 
     static String codeNow(String secret) {
@@ -76,7 +78,7 @@ class TwoFactorIntegrationTest {
 
     /** Enrols the account and returns {secret, recovery codes}. */
     String[] enrol(Account account) throws Exception {
-        String secret = JsonPath.read(post("/api/users/me/2fa/setup", null, account.token()).body(), "$.secret");
+        String secret = JsonPath.read(post("/api/users/me/2fa/setup", "{\"password\":\"secret123\"}", account.token()).body(), "$.secret");
         HttpResponse<String> enabled = post("/api/users/me/2fa/enable", "{\"code\":\"" + codeNow(secret) + "\"}", account.token());
         assertThat(enabled.statusCode()).isEqualTo(200);
         List<String> recovery = JsonPath.read(enabled.body(), "$.recoveryCodes");
@@ -99,7 +101,7 @@ class TwoFactorIntegrationTest {
     void setupReturnsSecretAndOtpauthUri() throws Exception {
         Account account = register();
 
-        HttpResponse<String> setup = post("/api/users/me/2fa/setup", null, account.token());
+        HttpResponse<String> setup = post("/api/users/me/2fa/setup", "{\"password\":\"secret123\"}", account.token());
 
         assertThat(setup.statusCode()).isEqualTo(200);
         String secret = JsonPath.read(setup.body(), "$.secret");
@@ -112,7 +114,7 @@ class TwoFactorIntegrationTest {
     @Test
     void enableNeedsAValidCode() throws Exception {
         Account account = register();
-        post("/api/users/me/2fa/setup", null, account.token());
+        post("/api/users/me/2fa/setup", "{\"password\":\"secret123\"}", account.token());
 
         assertThat(post("/api/users/me/2fa/enable", "{\"code\":\"000000\"}", account.token()).statusCode()).isEqualTo(400);
     }
@@ -123,7 +125,7 @@ class TwoFactorIntegrationTest {
 
         assertThat(enrolment).hasSize(9);
         for (int i = 1; i < enrolment.length; i++) {
-            assertThat(enrolment[i]).matches("[a-z2-7]{4}-[a-z2-7]{4}");
+            assertThat(enrolment[i]).matches("[a-z2-7]{4}-[a-z2-7]{4}-[a-z2-7]{4}-[a-z2-7]{4}"); // 80 bits
         }
     }
 
@@ -132,7 +134,7 @@ class TwoFactorIntegrationTest {
         Account account = register();
         enrol(account);
 
-        assertThat(post("/api/users/me/2fa/setup", null, account.token()).statusCode()).isEqualTo(409);
+        assertThat(post("/api/users/me/2fa/setup", "{\"password\":\"secret123\"}", account.token()).statusCode()).isEqualTo(409);
     }
 
     @Test
@@ -140,8 +142,8 @@ class TwoFactorIntegrationTest {
         Account account = register();
         String[] enrolment = enrol(account);
 
-        assertThat(post("/api/users/me/2fa/disable", "{\"code\":\"000000\"}", account.token()).statusCode()).isEqualTo(400);
-        assertThat(post("/api/users/me/2fa/disable", "{\"code\":\"" + enrolment[1] + "\"}", account.token()).statusCode()).isEqualTo(204);
+        assertThat(post("/api/users/me/2fa/disable", "{\"password\":\"secret123\",\"code\":\"000000\"}", account.token()).statusCode()).isEqualTo(400);
+        assertThat(post("/api/users/me/2fa/disable", "{\"password\":\"secret123\",\"code\":\"" + enrolment[1] + "\"}", account.token()).statusCode()).isEqualTo(204);
         assertThat(post("/api/auth/login", "{\"username\":\"" + account.mobile() + "\",\"password\":\"secret123\"}", null).statusCode())
                 .isEqualTo(200);
     }
@@ -156,5 +158,124 @@ class TwoFactorIntegrationTest {
                 + "\",\"password\":\"secret123\",\"otp\":\"" + enrolment[1] + "\"}", null);
 
         assertThat(claim(JsonPath.read(login.body(), "$.token"), "mfa")).containsExactly("true");
+    }
+
+    // --- login and step-up ---
+
+    /** Enrolment spent the current step's code; the next step's code is new (one step of drift is accepted). */
+    static String nextCode(String secret) {
+        return Totp.code(secret, Totp.stepAt(Instant.now()) + 1);
+    }
+
+    HttpResponse<String> login(Account account, String otp) throws Exception {
+        return post("/api/auth/login", "{\"username\":\"" + account.mobile() + "\",\"password\":\"secret123\""
+                + (otp == null ? "" : ",\"otp\":\"" + otp + "\"") + "}", null);
+    }
+
+    @Test
+    void loginWithout2faIsUnchanged() throws Exception {
+        HttpResponse<String> login = login(register(), null);
+
+        assertThat(login.statusCode()).isEqualTo(200);
+        assertThat(claim(JsonPath.read(login.body(), "$.token"), "amr")).containsExactly("pwd");
+    }
+
+    @Test
+    void loginWithoutCodeIs401MfaRequired() throws Exception {
+        Account account = register();
+        enrol(account);
+
+        HttpResponse<String> login = login(account, null);
+
+        assertThat(login.statusCode()).isEqualTo(401);
+        assertThat((String) JsonPath.read(login.body(), "$.type")).isEqualTo("https://paymesh.dev/problems/mfa-required");
+    }
+
+    @Test
+    void loginWithCodeGivesOtpAmr() throws Exception {
+        Account account = register();
+        String secret = enrol(account)[0];
+
+        HttpResponse<String> login = login(account, nextCode(secret));
+
+        assertThat(login.statusCode()).isEqualTo(200);
+        assertThat(claim(JsonPath.read(login.body(), "$.token"), "amr")).containsExactly("pwd", "otp");
+    }
+
+    @Test
+    void sameCodeCannotBeUsedTwice() throws Exception {
+        Account account = register();
+        String code = nextCode(enrol(account)[0]);
+
+        assertThat(login(account, code).statusCode()).isEqualTo(200);
+        assertThat(login(account, code).statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    void wrongCodesCountTowardLockout() throws Exception {
+        Account account = register();
+        enrol(account);
+
+        for (int i = 0; i < 4; i++) {
+            assertThat(login(account, "000000").statusCode()).isEqualTo(401);
+        }
+        assertThat(login(account, "000000").statusCode()).isEqualTo(429);
+    }
+
+    @Test
+    void recoveryCodeWorksOnce() throws Exception {
+        Account account = register();
+        String recovery = enrol(account)[3];
+
+        assertThat(login(account, recovery).statusCode()).isEqualTo(200);
+        assertThat(login(account, recovery).statusCode()).isEqualTo(401);
+    }
+
+    @Test
+    void stepUpReturnsAFreshOtpToken() throws Exception {
+        Account account = register();
+        String[] enrolment = enrol(account);
+        String token = JsonPath.read(login(account, enrolment[1]).body(), "$.token");
+
+        HttpResponse<String> stepUp = post("/api/users/me/step-up", "{\"code\":\"" + nextCode(enrolment[0]) + "\"}", token);
+
+        assertThat(stepUp.statusCode()).isEqualTo(200);
+        String fresh = JsonPath.read(stepUp.body(), "$.token");
+        assertThat(claim(fresh, "amr")).containsExactly("pwd", "otp");
+        assertThat(post("/api/users/me/step-up", "{\"code\":\"000000\"}", token).statusCode()).isEqualTo(400);
+    }
+
+    // --- hardening ---
+
+    @Test
+    void setupNeedsTheCurrentPassword() throws Exception {
+        Account account = register();
+
+        assertThat(post("/api/users/me/2fa/setup", "{\"password\":\"wrong-password\"}", account.token()).statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void wrongCodesOnDisableCountTowardLockout() throws Exception {
+        Account account = register();
+        enrol(account);
+        String wrong = "{\"password\":\"secret123\",\"code\":\"000000\"}";
+
+        for (int i = 0; i < 4; i++) {
+            assertThat(post("/api/users/me/2fa/disable", wrong, account.token()).statusCode()).isEqualTo(400);
+        }
+        assertThat(post("/api/users/me/2fa/disable", wrong, account.token()).statusCode()).isEqualTo(429);
+        assertThat(post("/api/users/me/2fa/disable", wrong, account.token()).statusCode()).isEqualTo(429); // locked: not even checked
+    }
+
+    @Test
+    void turningTwoFactorOnEndsOtherSessions() throws Exception {
+        Account account = register();
+        String refreshCookie = account.refreshCookie();
+
+        enrol(account);
+
+        HttpRequest refresh = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/auth/refresh"))
+                .header("Cookie", "paymesh_refresh=" + refreshCookie).POST(HttpRequest.BodyPublishers.noBody()).build();
+        assertThat(http.send(refresh, HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(401);
     }
 }

@@ -23,7 +23,8 @@ public final class UserDtos {
     }
 
     /** username = mobile number or email. */
-    public record LoginRequest(@NotBlank String username, @NotBlank String password) {
+    /** otp: the authenticator code (or a recovery code), needed only when two-factor login is on. */
+    public record LoginRequest(@NotBlank String username, @NotBlank String password, @Size(max = 32) String otp) {
     }
 
     public record UpdateUserRequest(

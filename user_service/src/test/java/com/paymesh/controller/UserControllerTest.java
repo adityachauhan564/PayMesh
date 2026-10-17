@@ -5,6 +5,7 @@ import com.paymesh.auth.AuthConfig;
 import com.paymesh.auth.RefreshTokens;
 import com.paymesh.auth.JwtKeys;
 import com.paymesh.auth.TokenIssuer;
+import com.paymesh.auth.TwoFactor;
 import com.paymesh.constants.TopicConstants;
 import com.paymesh.dto.UserWalletCreationRequest;
 import com.paymesh.model.User;
@@ -63,6 +64,8 @@ class UserControllerTest {
     private RefreshTokens refreshTokens; // session flow: RefreshFlowIntegrationTest
     @MockitoBean
     private AccessTokenDenylist accessTokenDenylist;
+    @MockitoBean
+    private TwoFactor twoFactor; // two-factor flow: TwoFactorIntegrationTest
     @MockitoBean
     private Outbox outbox;
     @MockitoBean

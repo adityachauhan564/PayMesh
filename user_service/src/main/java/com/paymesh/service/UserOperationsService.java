@@ -7,7 +7,9 @@ import com.paymesh.dto.UserWalletCreationRequest;
 import com.paymesh.model.User;
 import com.paymesh.outbox.Outbox;
 import com.paymesh.repository.UserRepository;
+import com.paymesh.auth.MfaRequiredException;
 import com.paymesh.auth.TokenIssuer;
+import com.paymesh.auth.TwoFactor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -32,6 +34,9 @@ public class UserOperationsService {
 
     @Autowired
     private TokenIssuer tokenIssuer;
+
+    @Autowired
+    private TwoFactor twoFactor;
 
     @Autowired
     private LoginAttemptService loginAttemptService;
@@ -72,14 +77,36 @@ public class UserOperationsService {
             loginAttemptService.recordFailure(user.getUserId());
             throw invalidCredentials();
         }
+        List<String> amr = List.of("pwd");
+        if (user.isTotpEnabled()) {
+            if (request.otp() == null || request.otp().isBlank()) {
+                throw new MfaRequiredException(); // not a failed attempt: the password was right
+            }
+            if (!twoFactor.verifyForUser(user.getUserId(), request.otp())) {
+                loginAttemptService.recordFailure(user.getUserId()); // wrong codes count toward the lockout
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid code");
+            }
+            amr = List.of("pwd", "otp");
+        }
         loginAttemptService.recordSuccess(user);
-        return new AuthResponse(issueToken(user), UserResponse.of(user));
+        return new AuthResponse(tokenIssuer.issueAccess(user, amr), UserResponse.of(user));
     }
 
     /** A fresh access token for an existing session (refresh). */
     public AuthResponse sessionFor(long userId) {
         User user = getUser(userId);
         return new AuthResponse(issueToken(user), UserResponse.of(user));
+    }
+
+    /** Proves the second factor again (large payments ask for it): a token with amr otp and a fresh iat. */
+    public AuthResponse stepUp(long userId, String code) {
+        User user = getUser(userId);
+        loginAttemptService.ensureNotLocked(user); // a locked account can't keep guessing codes here either
+        if (!twoFactor.verifyForUser(userId, code)) {
+            loginAttemptService.recordFailure(userId);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "That code didn't match");
+        }
+        return new AuthResponse(tokenIssuer.issueAccess(user, List.of("pwd", "otp")), UserResponse.of(user));
     }
 
     public User getUser(Long userId) {
