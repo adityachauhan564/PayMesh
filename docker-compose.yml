@@ -12,8 +12,8 @@ x-spring-service: &spring-service
 
 x-service-env: &service-env
   KAFKA_SERVERS: kafka:19092
-  # Required: set in .env (copy .env.example); compose refuses to start without it
-  JWT_SECRET: ${JWT_SECRET:?set it in .env (copy .env.example)}
+  # Tokens are RS256, signed by user-service; everyone else verifies them against its public keys
+  JWT_JWKS_URI: http://user-service:8081/.well-known/jwks.json
 
 services:
   mysql:
@@ -72,6 +72,15 @@ services:
       DB_URL: jdbc:mysql://mysql:3306/user_db
       DB_USERNAME: user_svc
       DB_PASSWORD: ${USER_DB_PASSWORD:?set it in .env (copy .env.example)}
+      # Empty = a new signing key per start (older access tokens stop verifying; the web app refreshes them)
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+      REDIS_HOST: redis
+    depends_on:
+      mysql: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      redis: { condition: service_started }
 
   wallet-service:
     <<: *spring-service
@@ -100,7 +109,7 @@ services:
     environment:
       KAFKA_SERVERS: kafka:19092
       REDIS_HOST: redis
-      JWT_SECRET: ${JWT_SECRET:?set it in .env (copy .env.example)}
+      JWT_JWKS_URI: http://user-service:8081/.well-known/jwks.json
       # Unset = mails are logged instead of sent (see notification_service)
       MAIL_USERNAME: ${MAIL_USERNAME:-}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
@@ -114,7 +123,7 @@ services:
       WALLET_SERVICE_URL: http://wallet-service:8091
       TRANSACTION_SERVICE_URL: http://transaction-service:8086
       REDIS_HOST: redis
-      JWT_SECRET: ${JWT_SECRET:?set it in .env (copy .env.example)}
+      JWT_JWKS_URI: http://user-service:8081/.well-known/jwks.json
       # Every request arrives through the wallet-ui nginx, which appends the client IP to X-Forwarded-For.
       # Safe only because the gateway port is not published: nothing can reach it around nginx.
       TRUSTED_PROXY_COUNT: 1

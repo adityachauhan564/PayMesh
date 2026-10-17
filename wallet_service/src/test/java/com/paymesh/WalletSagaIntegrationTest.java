@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 /** The wallet's side of the payment saga over a real broker: apply once, answer once, park what can't be read. */
-@SpringBootTest(properties = {"jwt.secret=0123456789abcdef0123456789abcdef", "outbox.poll-interval-ms=100",
+@SpringBootTest(properties = {"outbox.poll-interval-ms=100",
         "spring.kafka.consumer.auto-offset-reset=earliest"})
 class WalletSagaIntegrationTest {
 

@@ -22,7 +22,6 @@ import java.time.Duration;
 /** Own Spring context: user_service is down (nothing listening) and wallet_service is slower than the timeout. */
 @AutoConfigureWebTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-        "jwt.secret=" + TestTokens.SECRET,
         "jwt.issuer=" + TestTokens.ISSUER,
         "spring.cloud.gateway.server.webflux.httpclient.response-timeout=300ms",
         "LOGIN_RATE_LIMIT_REPLENISH_RATE=1000",
@@ -34,6 +33,7 @@ class UpstreamFailureTest {
 
     @DynamicPropertySource
     static void routes(DynamicPropertyRegistry registry) {
+        registry.add("jwt.jwks-uri", () -> TestTokens.JWKS_URI);
         registry.add("USER_SERVICE_URL", () -> "http://localhost:" + unusedPort());
         registry.add("WALLET_SERVICE_URL", SLOW_WALLET_SERVICE::url);
         RedisTestContainer.register(registry);

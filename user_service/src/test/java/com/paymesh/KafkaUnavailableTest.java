@@ -30,8 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Kafka is unreachable (real KafkaTemplate, nothing listening). Registration must still answer promptly, and its
  * wallet-creation event must be kept in the outbox for when Kafka is back, not lost.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "jwt.secret=user-service-integration-secret-32-bytes")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ExtendWith(OutputCaptureExtension.class)
 class KafkaUnavailableTest {
 

@@ -1,5 +1,7 @@
 package com.paymesh.gateway;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import com.paymesh.gateway.support.GatewayTestSupport;
 import com.paymesh.gateway.support.TestTokens;
 import org.junit.jupiter.api.Test;
@@ -41,7 +43,7 @@ class GatewaySecurityTest extends GatewayTestSupport {
     }
 
     static Stream<String> badTokens() {
-        return Stream.of("not-a-jwt", TestTokens.expired(), TestTokens.signedWithOtherSecret(),
+        return Stream.of("not-a-jwt", TestTokens.expired(), TestTokens.signedWithOtherKey(), TestTokens.hs256(),
                 TestTokens.withIssuer("someone-else"), TestTokens.withoutIssuer());
     }
 
@@ -62,6 +64,36 @@ class GatewaySecurityTest extends GatewayTestSupport {
                 .expectStatus().isOk();
 
         assertThat(WALLET_SERVICE.takeRequest().header(HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer " + token);
+    }
+
+    @Autowired
+    private ReactiveStringRedisTemplate redis;
+
+    @Test
+    void deniedTokenIsRejected() {
+        String jti = java.util.UUID.randomUUID().toString();
+        redis.opsForValue().set("denylist:jti:" + jti, "1", java.time.Duration.ofMinutes(5)).block();
+
+        expectUnauthorized(client.get().uri("/api/wallets/me").headers(h -> h.setBearerAuth(TestTokens.withJti(jti))).exchange())
+                .jsonPath("$.detail").isEqualTo("This session has been logged out");
+        assertThat(nothingForwarded()).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/auth/refresh", "/api/auth/logout"})
+    void refreshAndLogoutArePublicEvenWithAnExpiredToken(String path) throws InterruptedException {
+        client.post().uri(path).headers(h -> h.setBearerAuth(TestTokens.expired())).exchange()
+                .expectStatus().isOk();
+
+        assertThat(USER_SERVICE.takeRequest()).isNotNull();
+    }
+
+    @Test
+    void adminPathNeedsAdminRole() {
+        client.get().uri("/api/admin/anything").headers(h -> h.setBearerAuth(TestTokens.withRole("USER"))).exchange()
+                .expectStatus().isForbidden();
+        client.get().uri("/api/admin/anything").headers(h -> h.setBearerAuth(TestTokens.withRole("ADMIN"))).exchange()
+                .expectStatus().isNotFound(); // allowed through; no admin route exists yet
     }
 
     @Test

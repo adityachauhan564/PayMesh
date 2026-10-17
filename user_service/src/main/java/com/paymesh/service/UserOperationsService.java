@@ -7,18 +7,15 @@ import com.paymesh.dto.UserWalletCreationRequest;
 import com.paymesh.model.User;
 import com.paymesh.outbox.Outbox;
 import com.paymesh.repository.UserRepository;
-import com.paymesh.security.JwtProperties;
+import com.paymesh.auth.TokenIssuer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.time.Duration;
-import java.time.Instant;
+import java.util.List;
 
 @Service
 @Slf4j
@@ -34,10 +31,7 @@ public class UserOperationsService {
     private PasswordEncoder passwordEncoder;
 
     @Autowired
-    private JwtEncoder jwtEncoder;
-
-    @Autowired
-    private JwtProperties jwtProperties;
+    private TokenIssuer tokenIssuer;
 
     @Autowired
     private LoginAttemptService loginAttemptService;
@@ -82,6 +76,12 @@ public class UserOperationsService {
         return new AuthResponse(issueToken(user), UserResponse.of(user));
     }
 
+    /** A fresh access token for an existing session (refresh). */
+    public AuthResponse sessionFor(long userId) {
+        User user = getUser(userId);
+        return new AuthResponse(issueToken(user), UserResponse.of(user));
+    }
+
     public User getUser(Long userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
@@ -119,15 +119,7 @@ public class UserOperationsService {
     }
 
     private String issueToken(User user) {
-        Instant now = Instant.now();
-        JwtClaimsSet claims = JwtClaimsSet.builder()
-                .issuer(jwtProperties.issuer())
-                .subject(user.getUserId().toString())
-                .claim("name", user.getUserFullName())
-                .issuedAt(now)
-                .expiresAt(now.plus(Duration.ofHours(24)))
-                .build();
-        return jwtEncoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims)).getTokenValue();
+        return tokenIssuer.issueAccess(user, List.of("pwd"));
     }
 
     private static ResponseStatusException invalidCredentials() {

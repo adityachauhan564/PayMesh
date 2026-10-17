@@ -17,7 +17,6 @@ import java.util.Map;
  */
 @AutoConfigureWebTestClient
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-        "jwt.secret=" + TestTokens.SECRET,
         "jwt.issuer=" + TestTokens.ISSUER,
         "LOGIN_RATE_LIMIT_REPLENISH_RATE=1000",
         "LOGIN_RATE_LIMIT_BURST_CAPACITY=1000",
@@ -32,6 +31,7 @@ public abstract class GatewayTestSupport {
 
     @DynamicPropertySource
     static void pointRoutesAtStubs(DynamicPropertyRegistry registry) {
+        registry.add("jwt.jwks-uri", () -> TestTokens.JWKS_URI);
         registry.add("USER_SERVICE_URL", USER_SERVICE::url);
         registry.add("WALLET_SERVICE_URL", WALLET_SERVICE::url);
         registry.add("TRANSACTION_SERVICE_URL", TRANSACTION_SERVICE::url);

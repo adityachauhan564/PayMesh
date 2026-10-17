@@ -262,7 +262,7 @@ flowchart TD
     find -- "yes" --> locked{"Account locked?"}
     locked -- "yes" --> r2["429 · 'Try again in N minutes'<br/>even with the correct password"]
     locked -- "no" --> pw{"Password matches?<br/>(BCrypt)"}
-    pw -- "yes" --> ok["Reset failure count<br/>200 + JWT (24 h)"]
+    pw -- "yes" --> ok["Reset failure count<br/>200 + access token (15 min)<br/>+ refresh cookie"]
     pw -- "no" --> count["Count failure under a row lock"]
     count --> fifth{"5th failure in a row?"}
     fifth -- "no" --> r401
@@ -480,15 +480,38 @@ Keys keep ordering per user and per transaction. Payload classes live in `paymes
 
 | Area | Implementation |
 |---|---|
-| **Tokens** | HS256 JWT issued by user_service: `sub` = userId, `name`, `iss` = `paymesh`, 24 h expiry. Signature, expiry and issuer are checked by the gateway and every service. |
-| **Secrets** | `JWT_SECRET` must be set (≥ 32 bytes, same everywhere). **Services refuse to start without it**; a development value exists only in the `local` profile. No credentials are in code. |
-| **Public endpoints** | Only `POST /api/auth/register`, `POST /api/auth/login` and `GET /actuator/health` (status only). Everything else needs a token; unknown paths are denied. |
+| **Tokens** | **RS256** access tokens signed by user_service, **15 min**: `sub` = userId, `name`, `roles`, `amr`, `jti`, `iss` = `paymesh`. The gateway and every service verify signature, expiry and issuer against user_service's public keys at `/.well-known/jwks.json` (fetched once, cached, refetched when a token names an unknown key). |
+| **Keys** | Only user_service holds a private key (`JWT_PRIVATE_KEY`, PKCS#8 PEM; generated per start if unset). The gateway and services hold public keys only: none of them can mint a token. HS256 tokens are rejected. |
+| **Sessions** | Login sets a **refresh token** in an `HttpOnly; Secure; SameSite=Strict` cookie scoped to `/api/auth` (7 days; only its SHA-256 is stored). `POST /api/auth/refresh` rotates it and returns a new access token. **Reusing** an already-rotated refresh token (theft, or a stale tab) revokes the whole session family. The web app keeps the access token **in memory only**. |
+| **Logout** | `POST /api/auth/logout` revokes the refresh family and puts the access token's `jti` on a Redis denylist (TTL = its remaining lifetime) that the gateway checks on every request: the token stops working **immediately**. |
+| **Roles** | `USER` or `ADMIN` (`roles` claim → `ROLE_*`). `/api/admin/**` requires ADMIN at the gateway and in every service. ADMIN is granted by **user id** (`ADMIN_USER_IDS`) or the `role` column, never by email (emails are unverified and editable). |
+| **Public endpoints** | Only `POST /api/auth/register`, `/login`, `/refresh`, `/logout` and `GET /actuator/health` (status only). Everything else needs a token; unknown paths are denied. |
 | **Ownership** | Each user sees and changes only their own profile, wallet and transactions; other people's transactions return **404**. |
 | **Brute force** | Per-IP rate limit at the gateway (Redis) and per-account lockout in user_service ([details](#3-login-two-independent-brute-force-defences)) |
 | **Passwords** | BCrypt; never logged or returned |
 | **Errors** | `application/problem+json` everywhere; a 401 never says *why* a token failed; no stack traces reach clients |
 | **Logs** | No tokens, passwords, emails or message payloads. Failed Kafka sends log the topic and error only. |
 | **Spoofing** | `X-Forwarded-For` is ignored unless `TRUSTED_PROXY_COUNT` says your own proxy added it; correlation IDs from clients are reused only if they match `[A-Za-z0-9-]{1,64}` |
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant G as api_gateway
+    participant U as user_service
+    participant R as Redis
+    B->>U: POST /api/auth/login (via gateway)
+    U-->>B: access token (15 min, in memory) + refresh cookie (HttpOnly, 7 days)
+    B->>G: API call with Bearer token
+    G->>G: verify RS256 via JWKS, check roles
+    G->>R: jti on denylist?
+    G-->>B: response (forwarded to the service, which verifies again)
+    Note over B: access token expires or page reloads
+    B->>U: POST /api/auth/refresh (cookie)
+    U-->>B: new access token + new cookie (old one now used)
+    B->>U: POST /api/auth/logout
+    U->>R: denylist jti
+    U-->>B: cookie cleared, session family revoked
+```
 
 ### Production network boundary
 
@@ -517,8 +540,10 @@ Base URL: `http://localhost:8080` (the gateway). All bodies are JSON. 🔒 = nee
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/api/auth/register` | public | Create account; returns `{token, user}` |
-| POST | `/api/auth/login` | public | `{username: mobile or email, password}`; returns `{token, user}` |
+| POST | `/api/auth/register` | public | Create account; returns `{token, user}` and sets the refresh cookie |
+| POST | `/api/auth/login` | public | `{username: mobile or email, password}`; returns `{token, user}` and sets the refresh cookie |
+| POST | `/api/auth/refresh` | cookie | New `{token, user}` and a new cookie; `401` (cookie cleared) if expired, revoked or reused |
+| POST | `/api/auth/logout` | cookie | Ends the session (refresh family revoked, access token denylisted); always `204` |
 | GET | `/api/users/me` | 🔒 | My profile |
 | PUT | `/api/users/me` | 🔒 | Update `{fullName, emailId, address}` |
 | DELETE | `/api/users/me` | 🔒 | Delete account (withdraw your balance first) |
@@ -628,7 +653,7 @@ and Redis `:6379` are, on localhost only.
 | `mysql`, `kafka`, `redis` | upstream images | health-checked; services wait for MySQL and Kafka |
 
 Settings come from your shell or the `.env` file next to `docker-compose.yml` (start from `.env.example`): `MYSQL_ROOT_PASSWORD`,
-`USER_DB_PASSWORD`, `WALLET_DB_PASSWORD`, `TXN_DB_PASSWORD` and `JWT_SECRET` are **required**, and `MAIL_USERNAME` / `MAIL_PASSWORD` (unset = mails are logged by `notification-service`).
+`USER_DB_PASSWORD`, `WALLET_DB_PASSWORD` and `TXN_DB_PASSWORD` are **required**; `JWT_PRIVATE_KEY` is optional (empty = a new signing key per start), and `MAIL_USERNAME` / `MAIL_PASSWORD` (unset = mails are logged by `notification-service`).
 
 ```bash
 docker compose logs -f notification-service    # the emails
@@ -664,7 +689,7 @@ java -jar notification_service/target/notification_service-0.0.1-SNAPSHOT.jar --
 java -jar api_gateway/target/api_gateway-0.0.1-SNAPSHOT.jar                   --spring.profiles.active=local
 ```
 
-The `local` profile supplies a **development-only** JWT secret. Anywhere else, set `JWT_SECRET` instead (same value on all five).
+Start user_service first: the other services fetch its public signing keys from `http://localhost:8081/.well-known/jwks.json` on their first request (`JWT_JWKS_URI`). Without `JWT_PRIVATE_KEY`, user_service generates a new key per start: access tokens from before the restart stop verifying, and the web app quietly gets a new one through its refresh cookie (refresh tokens are database rows, so sessions survive).
 
 #### 3. Start the web app
 
@@ -690,7 +715,10 @@ All settings come from environment variables with local-friendly defaults.
 
 | Variable | Default | Used by | Purpose |
 |---|---|---|---|
-| `JWT_SECRET` | **required** (`local` profile has a dev value) | all | HS256 signing key, ≥ 32 bytes, identical everywhere |
+| `JWT_PRIVATE_KEY` | empty (a new key per start) | user | RSA private key (PKCS#8 PEM) that signs access tokens |
+| `JWT_JWKS_URI` | `http://localhost:8081/.well-known/jwks.json` | gateway, wallet, transaction, notification | Where to fetch the public signing keys |
+| `ADMIN_USER_IDS` | empty | user | Comma-separated user ids that get the ADMIN role |
+| `AUTH_COOKIE_SECURE` | `true` | user | `Secure` flag on the refresh cookie (browsers treat localhost as secure; turn off only for plain-HTTP non-localhost setups) |
 | `JWT_ISSUER` | `paymesh` | all | Expected `iss` claim |
 | `DB_URL` | `jdbc:mysql://localhost:3306/user_db` (`wallet_db`, `txn_db`) | user, wallet, transaction | The service's own schema |
 | `DB_USERNAME` / `DB_PASSWORD` | **required** (`local` profile: `user_svc` / `wallet_svc` / `txn_svc`, password `change-me-local-only`) | user, wallet, transaction | The service's own MySQL user |
@@ -771,7 +799,8 @@ paymesh/
 | **Wallet service decides, not transaction service** | The balance check and the debit happen in *one* transaction under row locks. Checking in one service and debiting in another allowed double spending in the original design. |
 | **Transactional outbox** | DB-then-Kafka loses events on crashes and outages; the outbox makes events part of the commit |
 | **JWT validated at gateway *and* services** | Defence in depth: bypassing the gateway grants nothing; services never trust headers |
-| **HS256 shared secret** | Simple for one issuer inside one trust boundary; easy to move to RS256/JWKS if third parties ever verify tokens |
+| **RS256 + JWKS instead of a shared secret** | Only user_service can mint tokens; a compromised gateway or service can't forge identities; a new key gets a new `kid`, and verifiers refetch the JWKS when they see one (only one key is published at a time, so tokens signed by the old key stop verifying and are silently refreshed) |
+| **Short access token + rotating refresh cookie** | A stolen access token is useful for 15 minutes; the refresh token is out of JavaScript's reach (HttpOnly) and a copied one is detected on reuse |
 | **Schema per service, Flyway migrations, `ddl-auto=validate`** | Services can't couple through tables; every schema change is reviewed SQL with a history; a drifted schema fails fast at startup |
 | **Double-entry ledger plus a cached balance** | Reads stay O(1); every rupee is explained by balanced postings, and a nightly reconciliation proves cache and ledger agree |
 | **Ledger rules as a pure function** | The invariants (balanced, right accounts) are property-tested over thousands of generated payments, independent of Spring and MySQL |
@@ -789,10 +818,8 @@ paymesh/
 
 - **Emails are at-most-once.** Duplicates are suppressed by `eventId`; a crash between claiming the id and sending can lose one email (by design: a duplicate payment email is worse than a missing one). If Redis is down, mail is sent without the duplicate check.
 - **Notification dead letters** stay on `SEND_NOTIFICATION.DLT` (notification_service has no database); replay them with the Kafka CLI.
-- **Tokens can't be revoked** before their 24 h expiry. Next step: short access tokens plus refresh tokens.
 - **Lockout can be abused**: someone who knows a mobile number can keep that account locked, 15 minutes at a time. Mitigations: CAPTCHA after failures, or unlock by email.
 - **Users behind one shared IP** (office, mobile carrier NAT) share a login rate-limit bucket.
-- **The UI keeps the token in `localStorage`**, which an XSS bug could read. An HttpOnly cookie would be safer.
 - **Simulated bank**: add money and withdraw don't call a real payment gateway.
 
 ---
@@ -801,7 +828,7 @@ paymesh/
 
 | Symptom | Cause and fix |
 |---|---|
-| `jwt.secret (env JWT_SECRET) must be set and at least 32 bytes` at startup | Intended. Run with `--spring.profiles.active=local`, or set `JWT_SECRET` |
+| API calls (curl, Postman) are `401` right after restarting user_service | Without `JWT_PRIVATE_KEY` it generated a new signing key, so older access tokens no longer verify. The web app refreshes automatically; for curl, log in again or call `/api/auth/refresh` (set `JWT_PRIVATE_KEY` to keep one key across restarts) |
 | `Access denied for user 'user_svc'` (or `wallet_svc`, `txn_svc`) or `Unknown database 'user_db'` after upgrading | Your `mysql-data` volume predates the per-service schemas, and init scripts only run on a new volume. `docker compose down -v` (this **wipes local data**), then start again |
 | `Access denied for user '...'@'localhost'` from the IDE | Your MySQL has different credentials: set `DB_USERNAME` / `DB_PASSWORD` (and `DB_URL` if not on 3306) |
 | Wallet says *"being created"* for a long time | Kafka or wallet_service isn't running. Nothing is lost: pending events sit in `outbox_event` and go out once both are up |

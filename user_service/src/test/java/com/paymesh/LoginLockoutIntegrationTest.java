@@ -39,7 +39,6 @@ import static org.mockito.Mockito.*;
  * failure count was never written. Only a real persistence layer shows that, and the row lock under concurrency.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-        "jwt.secret=user-service-integration-secret-32-bytes",
         "login.lockout.max-failed-attempts=3",
         "login.lockout.duration=15m"})
 class LoginLockoutIntegrationTest {

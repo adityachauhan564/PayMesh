@@ -1,5 +1,10 @@
 package com.paymesh.controller;
 
+import com.paymesh.auth.AccessTokenDenylist;
+import com.paymesh.auth.AuthConfig;
+import com.paymesh.auth.RefreshTokens;
+import com.paymesh.auth.JwtKeys;
+import com.paymesh.auth.TokenIssuer;
 import com.paymesh.constants.TopicConstants;
 import com.paymesh.dto.SendMailNotification;
 import com.paymesh.model.User;
@@ -38,10 +43,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Lockout after 3 failures for 15 minutes (shortened attempt count to keep the tests readable). */
 @WebMvcTest(value = UserController.class, properties = {
-        "jwt.secret=user-service-test-secret-at-least-32-bytes",
         "login.lockout.max-failed-attempts=3",
         "login.lockout.duration=15m"})
-@Import({SecurityConfig.class, UserOperationsService.class, LoginAttemptService.class, LockoutNotifier.class})
+@Import({SecurityConfig.class, UserOperationsService.class, LoginAttemptService.class, LockoutNotifier.class,
+        JwtKeys.class, TokenIssuer.class, AuthConfig.class})
 class LoginLockoutTest {
 
     private static final String MOBILE = "9876543210";
@@ -55,6 +60,10 @@ class LoginLockoutTest {
 
     @MockitoBean
     private UserRepository userRepository;
+    @MockitoBean
+    private RefreshTokens refreshTokens; // session flow: RefreshFlowIntegrationTest
+    @MockitoBean
+    private AccessTokenDenylist accessTokenDenylist;
     @MockitoBean
     private Outbox outbox;
     @MockitoBean

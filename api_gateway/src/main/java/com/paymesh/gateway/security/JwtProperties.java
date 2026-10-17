@@ -1,32 +1,22 @@
 package com.paymesh.gateway.security;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-
-import javax.crypto.SecretKey;
-import javax.crypto.spec.SecretKeySpec;
-import java.nio.charset.StandardCharsets;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * Must match what user_service signs with. Validated at startup so a missing or weak secret
- * fails fast instead of silently accepting forgeable tokens.
+ * Where user_service publishes its public signing keys (env JWT_JWKS_URI) and the issuer to accept (env JWT_ISSUER).
+ * The gateway holds no secret: it can verify tokens but never mint one.
  */
 @ConfigurationProperties("jwt")
-public record JwtProperties(String secret, String issuer) {
-
-    /** HS256 requires a key of at least 256 bits. */
-    private static final int MIN_SECRET_BYTES = 32;
+public record JwtProperties(@DefaultValue("http://localhost:8081/.well-known/jwks.json") String jwksUri,
+                            @DefaultValue("paymesh") String issuer) {
 
     public JwtProperties {
-        if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < MIN_SECRET_BYTES) {
-            throw new IllegalStateException("jwt.secret (env JWT_SECRET) must be set and at least "
-                    + MIN_SECRET_BYTES + " bytes long");
+        if (jwksUri == null || jwksUri.isBlank()) {
+            throw new IllegalStateException("jwt.jwks-uri (env JWT_JWKS_URI) must be set");
         }
         if (issuer == null || issuer.isBlank()) {
             throw new IllegalStateException("jwt.issuer (env JWT_ISSUER) must be set");
         }
-    }
-
-    public SecretKey signingKey() {
-        return new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
     }
 }

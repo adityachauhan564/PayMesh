@@ -1,7 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { HttpClient, HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
 import { CanActivateFn, Router } from '@angular/router';
-import { Observable, catchError, firstValueFrom, throwError } from 'rxjs';
+import { Observable, catchError, firstValueFrom, from, switchMap, throwError } from 'rxjs';
 
 export interface User {
   userId: number;
@@ -54,15 +54,19 @@ interface Session {
   user: User;
 }
 
-const SESSION_KEY = 'paymesh.session';
-
 @Injectable({ providedIn: 'root' })
 export class Api {
   private http = inject(HttpClient);
   private router = inject(Router);
 
-  readonly session = signal<Session | null>(loadSession());
+  /**
+   * In memory only: the access token never touches localStorage (where an XSS bug could read it). A page reload
+   * restores the session from the HttpOnly refresh cookie instead (restore()).
+   */
+  readonly session = signal<Session | null>(null);
   readonly user = computed(() => this.session()?.user);
+
+  private refreshing: Promise<Session | null> | null = null;
 
   login(username: string, password: string) {
     return this.startSession(this.http.post<Session>('/api/auth/login', { username, password }));
@@ -72,8 +76,38 @@ export class Api {
     return this.startSession(this.http.post<Session>('/api/auth/register', body));
   }
 
-  logout() {
-    localStorage.removeItem(SESSION_KEY);
+  /** Called once at startup: if the refresh cookie is still good, the user is logged in again. */
+  async restore() {
+    await this.refresh();
+  }
+
+  /**
+   * One refresh at a time: concurrent 401s in this tab share it, and a Web Lock makes other tabs (which share the
+   * refresh cookie) wait their turn, so each sends the cookie the previous one rotated. Null when the session is gone.
+   */
+  refresh(): Promise<Session | null> {
+    const call = () => firstValueFrom(this.http.post<Session>('/api/auth/refresh', {}));
+    const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
+    this.refreshing ??= (locks ? locks.request('paymesh-refresh', call).then((s) => s) : call())
+      .then((s) => {
+        this.session.set(s);
+        return s;
+      })
+      .catch(() => {
+        this.session.set(null);
+        return null;
+      })
+      .finally(() => (this.refreshing = null));
+    return this.refreshing;
+  }
+
+  /** Revokes the session server-side (refresh cookie and current access token), then forgets it here. */
+  async logout() {
+    try {
+      await firstValueFrom(this.http.post('/api/auth/logout', {}));
+    } catch {
+      // already logged out or offline: forgetting the session locally is what matters to the user
+    }
     this.session.set(null);
     this.router.navigate(['/login']);
   }
@@ -118,26 +152,30 @@ export class Api {
   }
 
   private saveSession(s: Session) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(s));
     this.session.set(s);
   }
 }
 
-function loadSession(): Session | null {
-  try {
-    return JSON.parse(localStorage.getItem(SESSION_KEY) ?? 'null');
-  } catch {
-    return null;
-  }
-}
-
+/**
+ * Adds the access token. On a 401 for a request that carried one, refreshes once (the 15-minute token simply
+ * expired) and retries; if the session is gone, logs out. /api/auth/* calls are never retried, so no loops.
+ */
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const api = inject(Api);
   const token = api.session()?.token;
-  return next(token ? req.clone({ setHeaders: { Authorization: `Bearer ${token}` } }) : req).pipe(
+  const withToken = (t: string | undefined) => (t ? req.clone({ setHeaders: { Authorization: `Bearer ${t}` } }) : req);
+  return next(withToken(token)).pipe(
     catchError((e: HttpErrorResponse) => {
-      if (e.status === 401 && token) api.logout(); // expired / invalid token
-      return throwError(() => e);
+      if (e.status !== 401 || !token || req.url.startsWith('/api/auth/')) return throwError(() => e);
+      return from(api.refresh()).pipe(
+        switchMap((session) => {
+          if (!session) {
+            api.logout();
+            return throwError(() => e);
+          }
+          return next(withToken(session.token));
+        }),
+      );
     }),
   );
 };

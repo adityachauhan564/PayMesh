@@ -15,7 +15,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Refill is too slow to matter within a test.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-        "jwt.secret=" + TestTokens.SECRET,
         "jwt.issuer=" + TestTokens.ISSUER,
         "LOGIN_RATE_LIMIT_REPLENISH_RATE=1",
         "LOGIN_RATE_LIMIT_BURST_CAPACITY=180",

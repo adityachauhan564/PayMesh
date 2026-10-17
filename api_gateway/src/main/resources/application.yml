@@ -52,9 +52,9 @@ spring:
               predicates:
                 - Path=/api/transactions/**
 
-# jwt.secret has no default on purpose: set JWT_SECRET (same value as every service),
-# or run with the "local" profile for development.
+# Tokens are RS256, signed by user_service; the gateway verifies them against its public keys (JWKS).
 jwt:
+  jwks-uri: ${JWT_JWKS_URI:http://localhost:8081/.well-known/jwks.json}
   issuer: ${JWT_ISSUER:paymesh}
 
 management:
