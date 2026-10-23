@@ -22,8 +22,8 @@
     "tslib": "^2.3.0"
   },
   "devDependencies": {
-    "@angular/build": "^21.2.26",
-    "@angular/cli": "^21.2.26",
+    "@angular/build": "^21.2.27",
+    "@angular/cli": "^21.2.27",
     "@angular/compiler-cli": "^21.2.0",
     "@types/qrcode": "^1.5.5",
     "jsdom": "^27.4.0",
