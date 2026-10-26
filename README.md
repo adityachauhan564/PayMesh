@@ -1151,4 +1151,4 @@ paymesh/
 - **Lockout can be abused**: someone who knows a mobile number can keep locking that account. The owner can unlock it straight away from the email link; a CAPTCHA after failures would stop the nuisance itself.
 - **Users behind one shared IP** (office, mobile carrier NAT) share a login rate-limit bucket.
 - **Simulated bank**: add money and withdraw don't call a real payment gateway (Razorpay top-ups are on the roadmap).
-- **Roadmap:** AWS deployment with GitOps (Argo CD), a redesigned UI with a demo mode, live updates, payment requests and split bills, a risk engine, an admin console, rewards, and analytics. See `docs/superpowers/specs/2026-10-17-paymesh-production-design.md`.
+- **Roadmap:** AWS deployment with GitOps (Argo CD), a redesigned UI with a demo mode, live updates, payment requests and split bills, a risk engine, an admin console, rewards, and analytics.

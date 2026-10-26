@@ -43,3 +43,5 @@ build/
 .superpowers/
 # jqwik run state (failure replay database)
 .jqwik-database
+# Superpowers specs and plans (local only)
+docs/superpowers/
