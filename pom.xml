@@ -25,7 +25,7 @@
 	<properties>
 		<java.version>21</java.version>
 		<!-- OpenTelemetry instrumentation release built against the BOM's OpenTelemetry API (1.62) -->
-		<otel-logback.version>2.32.0-alpha</otel-logback.version>
+		<otel-logback.version>2.33.1-alpha</otel-logback.version>
 	</properties>
 	<dependencies>
 		<dependency>
