@@ -14,7 +14,7 @@
 
     <properties>
         <jqwik.version>1.10.2</jqwik.version>
-        <shedlock.version>7.10.1</shedlock.version>
+        <shedlock.version>7.11.0</shedlock.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
